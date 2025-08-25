@@ -50,6 +50,10 @@ router.post('/', authMiddleware, async (req, res) => {
   } = req.body;
 
   // Validation
+  if (!req.user || !req.user.id) {
+    return res.status(401).json({ error: 'User authentication required' });
+  }
+
   if (!serviceId || !consultationTypeId || !designCategoryId || !designStyleId || !consultationDate) {
     return res.status(400).json({ 
       error: 'Service ID, consultation type, design category, design style, and consultation date are required' 
@@ -88,15 +92,15 @@ router.post('/', authMiddleware, async (req, res) => {
         design_style_id, consultation_date, consultation_time, address, notes
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
-      req.user.userId,
+      req.user.id,
       serviceId,
       consultationTypeId,
       designCategoryId,
       designStyleId,
       consultationDate,
-      consultationTime,
-      address,
-      notes
+      consultationTime || null,
+      address || null,
+      notes || null
     ]);
 
     res.status(201).json({ 
@@ -127,7 +131,7 @@ router.get('/', authMiddleware, async (req, res) => {
       JOIN design_styles ds ON c.design_style_id = ds.id
       WHERE c.user_id = ?
       ORDER BY c.created_at DESC
-    `, [req.user.userId]);
+    `, [req.user.id]);
 
     res.json(consultations);
   } catch (error) {
@@ -157,7 +161,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
       JOIN design_categories dc ON c.design_category_id = dc.id
       JOIN design_styles ds ON c.design_style_id = ds.id
       WHERE c.id = ? AND c.user_id = ?
-    `, [req.params.id, req.user.userId]);
+    `, [req.params.id, req.user.id]);
 
     if (!consultation) {
       return res.status(404).json({ error: 'Consultation not found' });
@@ -205,7 +209,7 @@ router.patch('/:id/cancel', authMiddleware, async (req, res) => {
   try {
     const consultation = await db.get(
       'SELECT id, status FROM consultations WHERE id = ? AND user_id = ?',
-      [req.params.id, req.user.userId]
+      [req.params.id, req.user.id]
     );
 
     if (!consultation) {
