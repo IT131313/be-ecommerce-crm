@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware, adminAuthMiddleware, userOnlyMiddleware } = require('../middleware/auth');
 
 // Get all services
 router.get('/', async (req, res) => {
@@ -51,7 +51,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Add new service (protected route)
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', adminAuthMiddleware, async (req, res) => {
   const { name, description, category, price, imageUrl } = req.body;
   
   if (!name || !description || !category) {

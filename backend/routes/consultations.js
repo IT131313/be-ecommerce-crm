@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware, adminAuthMiddleware, userOnlyMiddleware } = require('../middleware/auth');
 
 // Get all consultation types
 router.get('/types', async (req, res) => {
@@ -37,7 +37,7 @@ router.get('/design-styles', async (req, res) => {
 });
 
 // Create new consultation (protected route)
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', userOnlyMiddleware, async (req, res) => {
   const {
     serviceId,
     consultationTypeId,
@@ -114,7 +114,7 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // Get user's consultations (protected route)
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', userOnlyMiddleware, async (req, res) => {
   try {
     const consultations = await db.all(`
       SELECT 
@@ -141,7 +141,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 // Get specific consultation by ID (protected route)
-router.get('/:id', authMiddleware, async (req, res) => {
+router.get('/:id', userOnlyMiddleware, async (req, res) => {
   try {
     const consultation = await db.get(`
       SELECT 
@@ -175,7 +175,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 });
 
 // Update consultation status (protected route - for admin)
-router.patch('/:id/status', authMiddleware, async (req, res) => {
+router.patch('/:id/status', adminAuthMiddleware, async (req, res) => {
   const { status } = req.body;
   
   if (!status) {
@@ -205,7 +205,7 @@ router.patch('/:id/status', authMiddleware, async (req, res) => {
 });
 
 // Cancel consultation (protected route)
-router.patch('/:id/cancel', authMiddleware, async (req, res) => {
+router.patch('/:id/cancel', userOnlyMiddleware, async (req, res) => {
   try {
     const consultation = await db.get(
       'SELECT id, status FROM consultations WHERE id = ? AND user_id = ?',
@@ -233,7 +233,7 @@ router.patch('/:id/cancel', authMiddleware, async (req, res) => {
 });
 
 // Add consultation type (protected route - admin)
-router.post('/types', authMiddleware, async (req, res) => {
+router.post('/types', adminAuthMiddleware, async (req, res) => {
   const { name, description } = req.body;
   
   if (!name) {
@@ -257,7 +257,7 @@ router.post('/types', authMiddleware, async (req, res) => {
 });
 
 // Add design category (protected route - admin)
-router.post('/design-categories', authMiddleware, async (req, res) => {
+router.post('/design-categories', adminAuthMiddleware, async (req, res) => {
   const { name, imageUrl } = req.body;
   
   if (!name) {
@@ -281,7 +281,7 @@ router.post('/design-categories', authMiddleware, async (req, res) => {
 });
 
 // Add design style (protected route - admin)
-router.post('/design-styles', authMiddleware, async (req, res) => {
+router.post('/design-styles', adminAuthMiddleware, async (req, res) => {
   const { name, imageUrl } = req.body;
   
   if (!name) {
@@ -305,7 +305,7 @@ router.post('/design-styles', authMiddleware, async (req, res) => {
 });
 
 // Get all consultations for admin (protected route - admin)
-router.get('/admin/all', authMiddleware, async (req, res) => {
+router.get('/admin/all', adminAuthMiddleware, async (req, res) => {
   try {
     const consultations = await db.all(`
       SELECT 

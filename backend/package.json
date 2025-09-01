@@ -9,7 +9,8 @@
     "init-db": "mysql -u root < scripts/init-db.sql",
     "seed": "node scripts/seed-services.js",
     "seed-consultations": "node scripts/seed-consultations.js",
-    "init-consultation-system": "node scripts/init-consultation-system.js"
+    "init-consultation-system": "node scripts/init-consultation-system.js",
+    "init-complaint-system": "mysql -u root < scripts/init-complaint-system.sql"
   },
   "dependencies": {
     "bcrypt": "^5.1.0",
@@ -19,8 +20,10 @@
     "express": "^4.21.2",
     "google-auth-library": "^10.1.0",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
     "mysql2": "^3.14.1",
-    "nodemailer": "^7.0.3"
+    "nodemailer": "^7.0.3",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "nodemon": "^2.0.22",

@@ -15,6 +15,18 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Create admin table
+CREATE TABLE IF NOT EXISTS admins (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  role VARCHAR(50) DEFAULT 'admin',
+  reset_pin VARCHAR(10),
+  reset_pin_expiry DATETIME,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create services table
 CREATE TABLE IF NOT EXISTS services (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -118,4 +130,34 @@ CREATE TABLE IF NOT EXISTS consultations (
   FOREIGN KEY (design_category_id) REFERENCES design_categories(id) ON DELETE CASCADE,
   FOREIGN KEY (design_style_id) REFERENCES design_styles(id) ON DELETE CASCADE
 );
+
+-- Create chat rooms table
+CREATE TABLE IF NOT EXISTS chat_rooms (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  admin_id INT,
+  status VARCHAR(50) NOT NULL DEFAULT 'active',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
+);
+
+-- Create chat messages table
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  room_id INT NOT NULL,
+  sender_id INT NOT NULL,
+  sender_type ENUM('user', 'admin') NOT NULL,
+  message TEXT NOT NULL,
+  message_type VARCHAR(50) DEFAULT 'text',
+  is_read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE
+);
+
+-- Create index for better performance
+CREATE INDEX idx_chat_rooms_user_id ON chat_rooms(user_id);
+CREATE INDEX idx_chat_messages_room_id ON chat_messages(room_id);
+CREATE INDEX idx_chat_messages_created_at ON chat_messages(created_at);
 

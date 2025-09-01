@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware, adminAuthMiddleware, userOnlyMiddleware } = require('../middleware/auth');
 
 // Get all products
 router.get('/', async (req, res) => {
@@ -32,7 +32,7 @@ router.get('/category/:category', async (req, res) => {
 });
 
 // Add new product (protected route)
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', adminAuthMiddleware, async (req, res) => {
   const { name, description, category, price, imageUrl } = req.body;
   
   if (!name || !category || !price) {
@@ -52,7 +52,7 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // Update product stock (protected route)
-router.patch('/:id/stock', authMiddleware, async (req, res) => {
+router.patch('/:id/stock', adminAuthMiddleware, async (req, res) => {
   const { stock } = req.body;
   
   if (typeof stock !== 'number') {
@@ -72,7 +72,7 @@ router.patch('/:id/stock', authMiddleware, async (req, res) => {
 });
 
 // Add rating to a product (only for users who have purchased it)
-router.post('/:id/rating', authMiddleware, async (req, res) => {
+router.post('/:id/rating', userOnlyMiddleware, async (req, res) => {
   const { rating, review, orderId } = req.body;
   
   if (!rating || rating < 1 || rating > 5) {
@@ -199,7 +199,7 @@ router.get('/:id/ratings', async (req, res) => {
 });
 
 // Get user's purchased products that can be rated
-router.get('/user/rateable', authMiddleware, async (req, res) => {
+router.get('/user/rateable', userOnlyMiddleware, async (req, res) => {
   try {
     const rateableProducts = await db.all(`
       SELECT DISTINCT

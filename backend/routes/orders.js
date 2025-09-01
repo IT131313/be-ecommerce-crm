@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware, adminAuthMiddleware, userOnlyMiddleware } = require('../middleware/auth');
 
 // Get user's order history
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', userOnlyMiddleware, async (req, res) => {
   try {
     const orders = await db.all(`
       SELECT 
@@ -28,7 +28,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 // Get order details by ID
-router.get('/:id', authMiddleware, async (req, res) => {
+router.get('/:id', userOnlyMiddleware, async (req, res) => {
   try {
     // Get order info
     const order = await db.get(`
@@ -75,7 +75,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 });
 
 // Cancel order
-router.patch('/:id/cancel', authMiddleware, async (req, res) => {
+router.patch('/:id/cancel', userOnlyMiddleware, async (req, res) => {
   try {
     // Check if order exists and belongs to user
     const order = await db.get(`
@@ -115,9 +115,9 @@ router.patch('/:id/cancel', authMiddleware, async (req, res) => {
     for (const item of orderItems) {
       await db.run(`
         UPDATE products 
-        SET stock = stock + ?, sold = COALESCE(sold, 0) - ?
+        SET stock = stock + ?
         WHERE id = ?
-      `, [item.quantity, item.quantity, item.product_id]);
+      `, [item.quantity, item.product_id]);
     }
 
     res.json({ 
@@ -131,7 +131,7 @@ router.patch('/:id/cancel', authMiddleware, async (req, res) => {
 });
 
 // Update order status (admin functionality - can be extended later)
-router.patch('/:id/status', authMiddleware, async (req, res) => {
+router.patch('/:id/status', adminAuthMiddleware, async (req, res) => {
   const { status } = req.body;
   
   const validStatuses = ['pending', 'confirmed', 'processing', 'shipped', 'completed', 'cancelled'];
@@ -141,11 +141,12 @@ router.patch('/:id/status', authMiddleware, async (req, res) => {
   }
 
   try {
+    // Admin can update any order status
     const order = await db.get(`
       SELECT id, status as current_status
       FROM orders
-      WHERE id = ? AND user_id = ?
-    `, [req.params.id, req.user.id]);
+      WHERE id = ?
+    `, [req.params.id]);
 
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
@@ -158,7 +159,7 @@ router.patch('/:id/status', authMiddleware, async (req, res) => {
     `, [status, req.params.id]);
 
     res.json({ 
-      message: 'Order status updated successfully',
+      message: 'Order status updated successfully by admin',
       orderId: req.params.id,
       newStatus: status
     });

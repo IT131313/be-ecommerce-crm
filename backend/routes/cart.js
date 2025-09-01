@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
-const authMiddleware = require('../middleware/auth');
+const { userOnlyMiddleware } = require('../middleware/auth');
 
 // Get user's cart
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', userOnlyMiddleware, async (req, res) => {
   try {
     const cartItems = await db.all(`
       SELECT 
@@ -28,7 +28,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 // Add item to cart
-router.post('/add', authMiddleware, async (req, res) => {
+router.post('/add', userOnlyMiddleware, async (req, res) => {
   const { productId, quantity = 1 } = req.body;
   
   if (!productId) {
@@ -101,7 +101,7 @@ router.post('/add', authMiddleware, async (req, res) => {
 });
 
 // Update cart item quantity
-router.patch('/update/:itemId', authMiddleware, async (req, res) => {
+router.patch('/update/:itemId', userOnlyMiddleware, async (req, res) => {
   const { quantity } = req.body;
   
   if (typeof quantity !== 'number' || quantity < 0) {
@@ -166,7 +166,7 @@ router.patch('/update/:itemId', authMiddleware, async (req, res) => {
 });
 
 // Checkout
-router.post('/checkout', authMiddleware, async (req, res) => {
+router.post('/checkout', userOnlyMiddleware, async (req, res) => {
   try {
     // Get cart items
     const cartItems = await db.all(`
@@ -235,7 +235,7 @@ router.post('/checkout', authMiddleware, async (req, res) => {
 });
 
 // Remove item from cart
-router.delete('/remove/:itemId', authMiddleware, async (req, res) => {
+router.delete('/remove/:itemId', userOnlyMiddleware, async (req, res) => {
   try {
     const cartItem = await db.get(
       'SELECT id FROM cart_items WHERE id = ? AND user_id = ?',
