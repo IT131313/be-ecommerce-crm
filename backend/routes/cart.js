@@ -168,6 +168,15 @@ router.patch('/update/:itemId', userOnlyMiddleware, async (req, res) => {
 // Checkout
 router.post('/checkout', userOnlyMiddleware, async (req, res) => {
   try {
+    const {
+      shippingAddress,
+      contactPhone,
+      shipping_address,
+      contact_phone,
+      shippingMethod,
+      shipping_method
+    } = req.body || {};
+
     // Get cart items
     const cartItems = await db.all(`
       SELECT 
@@ -195,14 +204,65 @@ router.post('/checkout', userOnlyMiddleware, async (req, res) => {
     }
 
     // Calculate total amount
-    const totalAmount = cartItems.reduce((sum, item) => 
+    const totalAmount = cartItems.reduce((sum, item) =>
       sum + (item.price * item.quantity), 0
     );
 
+    const userProfile = await db.get(
+      'SELECT address, phone FROM users WHERE id = ?',
+      [req.user.id]
+    );
+
+    let finalShippingAddress = shippingAddress ?? shipping_address ?? userProfile?.address ?? null;
+    let finalContactPhone = contactPhone ?? contact_phone ?? userProfile?.phone ?? null;
+    let finalShippingMethod = (shippingMethod ?? shipping_method ?? null);
+
+    if (finalShippingMethod !== null && finalShippingMethod !== undefined) {
+      finalShippingMethod = String(finalShippingMethod).trim().toUpperCase();
+    }
+
+    const allowedMethods = ['JNE', 'JNT'];
+    if (!finalShippingMethod || !allowedMethods.includes(finalShippingMethod)) {
+      return res.status(400).json({ error: 'Shipping method must be either JNE or JNT' });
+    }
+
+    if (finalShippingAddress !== null && finalShippingAddress !== undefined) {
+      finalShippingAddress = String(finalShippingAddress).trim();
+      if (!finalShippingAddress) {
+        finalShippingAddress = null;
+      }
+    }
+
+    if (finalContactPhone !== null && finalContactPhone !== undefined) {
+      finalContactPhone = String(finalContactPhone).trim();
+      if (!finalContactPhone) {
+        finalContactPhone = null;
+      }
+    }
+
+    if (!finalShippingAddress || !finalContactPhone) {
+      return res.status(400).json({
+        error: 'Shipping address and contact phone are required. Update your profile if they are missing.'
+      });
+    }
+
+    if (finalShippingAddress.length > 500) {
+      return res.status(400).json({ error: 'Shipping address cannot exceed 500 characters' });
+    }
+
+    const phoneDigits = finalContactPhone.replace(/[^0-9]/g, '');
+    if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+      return res.status(400).json({ error: 'Contact phone must be between 7 and 15 digits' });
+    }
+
+    if (!/^[0-9+()\-\s]+$/.test(finalContactPhone)) {
+      return res.status(400).json({ error: 'Contact phone contains invalid characters' });
+    }
+
     // Create order
     const orderResult = await db.run(
-      'INSERT INTO orders (user_id, total_amount) VALUES (?, ?)',
-      [req.user.id, totalAmount]
+      'INSERT INTO orders (user_id, total_amount, shipping_address, contact_phone, shipping_method) VALUES (?, ?, ?, ?, ?)',
+      [req.user.id, totalAmount, finalShippingAddress, finalContactPhone, finalShippingMethod]
     );
 
     // Add order items and update product stock
@@ -226,7 +286,11 @@ router.post('/checkout', userOnlyMiddleware, async (req, res) => {
 
     res.json({ 
       message: 'Order placed successfully',
-      orderId: orderResult.lastID
+      orderId: orderResult.lastID,
+      shippingAddress: finalShippingAddress,
+      contactPhone: finalContactPhone,
+      shippingMethod: finalShippingMethod,
+      totalAmount
     });
   } catch (error) {
     console.error(error);

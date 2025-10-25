@@ -149,6 +149,41 @@ router.post('/:id/rating', userOnlyMiddleware, async (req, res) => {
   }
 });
 
+// Get product by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const product = await db.get(
+      'SELECT * FROM products WHERE id = ?',
+      [req.params.id]
+    );
+
+    if (!product) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    const ratingSummary = await db.get(
+      'SELECT AVG(rating) as average_rating, COUNT(*) as total_ratings FROM product_ratings WHERE product_id = ?',
+      [req.params.id]
+    );
+
+    const averageRating = ratingSummary && ratingSummary.average_rating !== null
+      ? Math.round(ratingSummary.average_rating * 10) / 10
+      : (typeof product.rating === 'number' ? product.rating : null);
+
+    const totalRatings = ratingSummary && ratingSummary.total_ratings !== null
+      ? ratingSummary.total_ratings
+      : (typeof product.rating_count === 'number' ? product.rating_count : 0);
+
+    res.json({
+      ...product,
+      average_rating: averageRating,
+      total_ratings: totalRatings
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 // Get product ratings
 router.get('/:id/ratings', async (req, res) => {
   try {

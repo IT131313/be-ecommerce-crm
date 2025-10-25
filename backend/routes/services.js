@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { authMiddleware, adminAuthMiddleware, userOnlyMiddleware } = require('../middleware/auth');
@@ -70,4 +70,105 @@ router.post('/', adminAuthMiddleware, async (req, res) => {
   }
 });
 
+// Update service (protected route)
+router.put('/:id', adminAuthMiddleware, async (req, res) => {
+  const { name, description, category, price, imageUrl } = req.body;
+
+  if ([name, description, category, price, imageUrl].every((value) => value === undefined)) {
+    return res.status(400).json({ error: 'At least one field must be provided for update' });
+  }
+
+  let normalizedPrice = price;
+
+  if (price !== undefined) {
+    if (price === null) {
+      normalizedPrice = null;
+    } else {
+      normalizedPrice = Number(price);
+      if (Number.isNaN(normalizedPrice)) {
+        return res.status(400).json({ error: 'Price must be a valid number' });
+      }
+    }
+  }
+
+  try {
+    const existingService = await db.get(
+      'SELECT id FROM services WHERE id = ?',
+      [req.params.id]
+    );
+
+    if (!existingService) {
+      return res.status(404).json({ error: 'Service not found' });
+    }
+
+    const fields = [];
+    const values = [];
+
+    if (name !== undefined) {
+      fields.push('name = ?');
+      values.push(name);
+    }
+
+    if (description !== undefined) {
+      fields.push('description = ?');
+      values.push(description);
+    }
+
+    if (category !== undefined) {
+      fields.push('category = ?');
+      values.push(category);
+    }
+
+    if (price !== undefined) {
+      fields.push('price = ?');
+      values.push(normalizedPrice);
+    }
+
+    if (imageUrl !== undefined) {
+      fields.push('image_url = ?');
+      values.push(imageUrl);
+    }
+
+    if (!fields.length) {
+      return res.status(400).json({ error: 'No valid fields provided for update' });
+    }
+
+    values.push(req.params.id);
+
+    const updateQuery = `UPDATE services SET ${fields.join(', ')} WHERE id = ?`;
+    await db.run(updateQuery, values);
+
+    const updatedService = await db.get(
+      'SELECT * FROM services WHERE id = ?',
+      [req.params.id]
+    );
+
+    res.json({ message: 'Service updated successfully', service: updatedService });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Delete service (protected route)
+router.delete('/:id', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { changes } = await db.run(
+      'DELETE FROM services WHERE id = ?',
+      [req.params.id]
+    );
+
+    if (!changes) {
+      return res.status(404).json({ error: 'Service not found' });
+    }
+
+    res.json({ message: 'Service deleted successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;
+
+

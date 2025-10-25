@@ -3,6 +3,7 @@ const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 require('dotenv').config();
+const path = require('path');
 const db = require('./config/database');
 const authRoutes = require('./routes/auth');
 const adminAuthRoutes = require('./routes/admin-auth');
@@ -33,6 +34,7 @@ const io = new Server(server, {
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const PORT = process.env.PORT || 3000;
 
@@ -43,6 +45,57 @@ async function initializeDatabase() {
     // Verify database connection
     await db.run('SELECT 1');
     console.log('Database initialized successfully');
+
+    // Ensure orders.shipping_method column exists
+    try {
+      const dbName = process.env.DB_NAME || 'auth_db';
+      const columnCheck = await db.get(
+        `SELECT COUNT(*) as cnt
+         FROM INFORMATION_SCHEMA.COLUMNS 
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'orders' AND COLUMN_NAME = 'shipping_method'`,
+        [dbName]
+      );
+      if (!columnCheck || columnCheck.cnt === 0) {
+        await db.run("ALTER TABLE orders ADD COLUMN shipping_method VARCHAR(10) NULL");
+        console.log('Added orders.shipping_method column');
+      }
+    } catch (e) {
+      console.warn('Could not ensure orders.shipping_method column:', e.message || e);
+    }
+
+    // Ensure orders.tracking_number column exists
+    try {
+      const dbName = process.env.DB_NAME || 'auth_db';
+      const columnCheckTrack = await db.get(
+        `SELECT COUNT(*) as cnt
+         FROM INFORMATION_SCHEMA.COLUMNS 
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'orders' AND COLUMN_NAME = 'tracking_number'`,
+        [dbName]
+      );
+      if (!columnCheckTrack || columnCheckTrack.cnt === 0) {
+        await db.run("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(100) NULL");
+        console.log('Added orders.tracking_number column');
+      }
+    } catch (e) {
+      console.warn('Could not ensure orders.tracking_number column:', e.message || e);
+    }
+
+    // Ensure orders.shipped_at column exists
+    try {
+      const dbName = process.env.DB_NAME || 'auth_db';
+      const columnCheckShippedAt = await db.get(
+        `SELECT COUNT(*) as cnt
+         FROM INFORMATION_SCHEMA.COLUMNS 
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'orders' AND COLUMN_NAME = 'shipped_at'`,
+        [dbName]
+      );
+      if (!columnCheckShippedAt || columnCheckShippedAt.cnt === 0) {
+        await db.run("ALTER TABLE orders ADD COLUMN shipped_at DATETIME NULL");
+        console.log('Added orders.shipped_at column');
+      }
+    } catch (e) {
+      console.warn('Could not ensure orders.shipped_at column:', e.message || e);
+    }
   } catch (error) {
     console.error('Failed to initialize database:', error);
     throw error;
@@ -58,6 +111,7 @@ app.get('/', (req, res) => {
     endpoints: [
       '/api/auth/login',
       '/api/auth/register', 
+      '/api/auth/google',
       '/api/auth/forgot-password',
       '/api/auth/reset-password',
       '/api/admin/auth/login',
@@ -116,3 +170,6 @@ initializeDatabase()
     console.error('Failed to start server:', err);
     process.exit(1);
   });
+
+
+

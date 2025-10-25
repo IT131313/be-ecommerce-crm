@@ -1,31 +1,58 @@
 const jwt = require('jsonwebtoken');
+const db = require('../config/database');
+
+async function assertNotRevoked(token) {
+  try {
+    const row = await db.get(
+      "SELECT id FROM revoked_tokens WHERE token = ? AND (expires_at IS NULL OR expires_at > NOW())",
+      [token]
+    );
+    if (row) {
+      const err = new Error('Token revoked');
+      err.status = 401;
+      throw err;
+    }
+  } catch (e) {
+    if (e.status === 401) throw e;
+    // On DB error, fail closed for safety
+    const err = new Error('Authentication service unavailable');
+    err.status = 401;
+    throw err;
+  }
+}
 
 // General authentication middleware
-const authMiddleware = (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     
     if (!token) {
       return res.status(401).json({ error: 'Authentication required' });
     }
+
+    // Check blacklist
+    await assertNotRevoked(token);
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     next();
   } catch (error) {
     console.error('Auth middleware error:', error);
-    return res.status(401).json({ error: 'Invalid token' });
+    return res.status(error.status || 401).json({ error: 'Invalid token' });
   }
 };
 
 // Admin-only authentication middleware
-const adminAuthMiddleware = (req, res, next) => {
+const adminAuthMiddleware = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     
     if (!token) {
       return res.status(401).json({ error: 'Authentication required' });
     }
+    
+    // Check blacklist
+    await assertNotRevoked(token);
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
@@ -42,13 +69,16 @@ const adminAuthMiddleware = (req, res, next) => {
 };
 
 // User-only authentication middleware (blocks admin access)
-const userOnlyMiddleware = (req, res, next) => {
+const userOnlyMiddleware = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     
     if (!token) {
       return res.status(401).json({ error: 'Authentication required' });
     }
+    
+    // Check blacklist
+    await assertNotRevoked(token);
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     

@@ -76,6 +76,35 @@ Default admin:
 - Email: `admin@example.com`
 - Password: `admin123`
 
+### First-Time Admin Setup (Self Register)
+- Endpoint: `POST /api/admin/auth/setup`
+- Gunanya untuk membuat admin pertama kali ketika tabel `admins` masih kosong. Endpoint mengembalikan JWT agar bisa langsung dipakai.
+
+Contoh request:
+```bash
+POST /api/admin/auth/setup
+{
+  "email": "admin@example.com",
+  "password": "admin123",
+  "name": "System Administrator"
+}
+```
+
+Perilaku keamanan:
+- Jika sudah ada admin, endpoint akan menolak (403) secara default.
+- Anda bisa mengizinkan setup tambahan dengan menambahkan `ADMIN_SETUP_KEY` di `.env` lalu sertakan `setupKey` di body:
+```json
+{
+  "email": "second.admin@example.com",
+  "password": "StrongPass123!",
+  "name": "Admin Kedua",
+  "setupKey": "<nilai_ADMIN_SETUP_KEY>"
+}
+```
+
+Catatan:
+- Endpoint ini juga otomatis memperbaiki akun admin yang sudah ada tetapi kolom `password` masih kosong/NULL (akan diisi hash bcrypt baru).
+
 ## Cara Menggunakan
 
 ### Login Admin

@@ -8,7 +8,7 @@ const { userOnlyMiddleware } = require('../middleware/auth');
 router.get('/profile', userOnlyMiddleware, async (req, res) => {
   try {
     const user = await db.get(`
-      SELECT id, email, username, created_at 
+      SELECT id, email, username, address, phone, created_at 
       FROM users 
       WHERE id = ?
     `, [req.user.id]);
@@ -36,6 +36,8 @@ router.get('/profile', userOnlyMiddleware, async (req, res) => {
         id: user.id,
         email: user.email,
         username: user.username,
+        address: user.address || null,
+        phone: user.phone || null,
         created_at: user.created_at
       },
       stats: {
@@ -53,63 +55,126 @@ router.get('/profile', userOnlyMiddleware, async (req, res) => {
 
 // Update user profile (user only)
 router.patch('/profile', userOnlyMiddleware, async (req, res) => {
-  const { email, username } = req.body;
-  
-  if (!email && !username) {
-    return res.status(400).json({ error: 'At least one field (email or username) is required' });
+  const { email, username, address, phone } = req.body || {};
+
+  const hasUpdates = [email, username, address, phone].some((value) => value !== undefined);
+
+  if (!hasUpdates) {
+    return res.status(400).json({ error: 'At least one field (email, username, address, or phone) is required' });
   }
 
   try {
-    // Get current user data
     const currentUser = await db.get(
-      'SELECT email, username FROM users WHERE id = ?',
+      'SELECT email, username, address, phone FROM users WHERE id = ?',
       [req.user.id]
     );
-    
+
     if (!currentUser) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Use current values if not provided
-    const newEmail = email || currentUser.email;
-    const newUsername = username || currentUser.username;
+    const sanitizeOptionalString = (value) => {
+      if (value === undefined) {
+        return undefined;
+      }
+      if (value === null) {
+        return null;
+      }
+      return String(value).trim();
+    };
 
-    // Check if email or username already exists for other users
-    if (email && email !== currentUser.email) {
+    const incomingEmail = sanitizeOptionalString(email);
+    const incomingUsername = sanitizeOptionalString(username);
+    const incomingAddress = sanitizeOptionalString(address);
+    const incomingPhone = sanitizeOptionalString(phone);
+
+    const newEmail = incomingEmail !== undefined ? incomingEmail : currentUser.email;
+    const newUsername = incomingUsername !== undefined ? incomingUsername : currentUser.username;
+    const newAddress = incomingAddress !== undefined ? incomingAddress : currentUser.address;
+    const newPhone = incomingPhone !== undefined ? incomingPhone : currentUser.phone;
+
+    if (!newEmail) {
+      return res.status(400).json({ error: 'Email cannot be empty' });
+    }
+
+    if (!newUsername) {
+      return res.status(400).json({ error: 'Username cannot be empty' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (incomingEmail !== undefined && !emailRegex.test(newEmail)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    if (incomingUsername !== undefined && newUsername.length < 3) {
+      return res.status(400).json({ error: 'Username must be at least 3 characters long' });
+    }
+
+    if (newEmail !== currentUser.email) {
       const existingEmail = await db.get(
         'SELECT id FROM users WHERE email = ? AND id != ?',
-        [email, req.user.id]
+        [newEmail, req.user.id]
       );
-      
+
       if (existingEmail) {
         return res.status(400).json({ error: 'Email already exists' });
       }
     }
 
-    if (username && username !== currentUser.username) {
+    if (newUsername !== currentUser.username) {
       const existingUsername = await db.get(
         'SELECT id FROM users WHERE username = ? AND id != ?',
-        [username, req.user.id]
+        [newUsername, req.user.id]
       );
-      
+
       if (existingUsername) {
         return res.status(400).json({ error: 'Username already exists' });
       }
     }
 
-    // Update user profile
+    let validatedPhone = newPhone;
+    if (validatedPhone !== undefined && validatedPhone !== null) {
+      validatedPhone = String(validatedPhone).trim();
+      if (!validatedPhone) {
+        validatedPhone = null;
+      }
+    }
+
+    if (validatedPhone) {
+      const digitsOnly = validatedPhone.replace(/[^0-9]/g, '');
+      if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+        return res.status(400).json({ error: 'Phone number must be between 7 and 15 digits' });
+      }
+      if (!/^[0-9+()\-\s]+$/.test(validatedPhone)) {
+        return res.status(400).json({ error: 'Phone number contains invalid characters' });
+      }
+    }
+
+    let validatedAddress = newAddress;
+    if (validatedAddress !== undefined && validatedAddress !== null) {
+      validatedAddress = String(validatedAddress).trim();
+      if (!validatedAddress) {
+        validatedAddress = null;
+      }
+    }
+
+    if (validatedAddress && validatedAddress.length > 500) {
+      return res.status(400).json({ error: 'Address cannot exceed 500 characters' });
+    }
+
     await db.run(`
       UPDATE users 
-      SET email = ?, username = ?
+      SET email = ?, username = ?, address = ?, phone = ?
       WHERE id = ?
-    `, [newEmail, newUsername, req.user.id]);
-    
+    `, [newEmail, newUsername, validatedAddress, validatedPhone, req.user.id]);
     res.json({ 
       message: 'Profile updated successfully',
       user: {
         id: req.user.id,
         email: newEmail,
-        username: newUsername
+        username: newUsername,
+        address: validatedAddress,
+        phone: validatedPhone
       }
     });
   } catch (error) {

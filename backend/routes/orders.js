@@ -3,22 +3,57 @@ const router = express.Router();
 const db = require('../config/database');
 const { authMiddleware, adminAuthMiddleware, userOnlyMiddleware } = require('../middleware/auth');
 
-// Get user's order history
-router.get('/', userOnlyMiddleware, async (req, res) => {
+// Get orders list
+// - Users: only their own orders
+// - Admins: all orders
+router.get('/', authMiddleware, async (req, res) => {
   try {
-    const orders = await db.all(`
-      SELECT 
-        o.id,
-        o.total_amount,
-        o.status,
-        o.created_at,
-        COUNT(oi.id) as item_count
-      FROM orders o
-      LEFT JOIN order_items oi ON o.id = oi.order_id
-      WHERE o.user_id = ?
-      GROUP BY o.id
-      ORDER BY o.created_at DESC
-    `, [req.user.id]);
+    let orders;
+
+    if (req.user && req.user.isAdmin && req.user.role === 'admin') {
+      // Admin: get all orders
+      orders = await db.all(`
+        SELECT 
+          o.id,
+          o.user_id,
+          o.total_amount,
+          o.shipping_address,
+          o.contact_phone,
+          o.shipping_method,
+          o.tracking_number,
+          o.shipped_at,
+          o.status,
+          o.created_at,
+          u.username,
+          u.email,
+          COUNT(oi.id) as item_count
+        FROM orders o
+        LEFT JOIN order_items oi ON o.id = oi.order_id
+        LEFT JOIN users u ON o.user_id = u.id
+        GROUP BY o.id
+        ORDER BY o.created_at DESC
+      `);
+    } else {
+      // Regular user: only own orders
+      orders = await db.all(`
+        SELECT 
+          o.id,
+          o.total_amount,
+          o.shipping_address,
+          o.contact_phone,
+          o.shipping_method,
+          o.tracking_number,
+          o.shipped_at,
+          o.status,
+          o.created_at,
+          COUNT(oi.id) as item_count
+        FROM orders o
+        LEFT JOIN order_items oi ON o.id = oi.order_id
+        WHERE o.user_id = ?
+        GROUP BY o.id
+        ORDER BY o.created_at DESC
+      `, [req.user.id]);
+    }
     
     res.json(orders);
   } catch (error) {
@@ -28,21 +63,52 @@ router.get('/', userOnlyMiddleware, async (req, res) => {
 });
 
 // Get order details by ID
-router.get('/:id', userOnlyMiddleware, async (req, res) => {
+// - Users: only their own order
+// - Admins: any order
+router.get('/:id', authMiddleware, async (req, res) => {
   try {
+    let order;
     // Get order info
-    const order = await db.get(`
-      SELECT 
-        o.id,
-        o.total_amount,
-        o.status,
-        o.created_at,
-        u.username,
-        u.email
-      FROM orders o
-      JOIN users u ON o.user_id = u.id
-      WHERE o.id = ? AND o.user_id = ?
-    `, [req.params.id, req.user.id]);
+    if (req.user && req.user.isAdmin && req.user.role === 'admin') {
+      // Admin can view any order
+      order = await db.get(`
+        SELECT 
+          o.id,
+          o.user_id,
+          o.total_amount,
+          o.shipping_address,
+          o.contact_phone,
+          o.shipping_method,
+          o.tracking_number,
+          o.shipped_at,
+          o.status,
+          o.created_at,
+          u.username,
+          u.email
+        FROM orders o
+        JOIN users u ON o.user_id = u.id
+        WHERE o.id = ?
+      `, [req.params.id]);
+    } else {
+      // Regular user: must own the order
+      order = await db.get(`
+        SELECT 
+          o.id,
+          o.total_amount,
+          o.shipping_address,
+          o.contact_phone,
+          o.shipping_method,
+          o.tracking_number,
+          o.shipped_at,
+          o.status,
+          o.created_at,
+          u.username,
+          u.email
+        FROM orders o
+        JOIN users u ON o.user_id = u.id
+        WHERE o.id = ? AND o.user_id = ?
+      `, [req.params.id, req.user.id]);
+    }
 
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });

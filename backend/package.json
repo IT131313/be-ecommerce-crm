@@ -6,11 +6,13 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "dev:ngrok": "node scripts/dev-with-ngrok.js",
     "init-db": "mysql -u root < scripts/init-db.sql",
     "seed": "node scripts/seed-services.js",
     "seed-consultations": "node scripts/seed-consultations.js",
     "init-consultation-system": "node scripts/init-consultation-system.js",
-    "init-complaint-system": "mysql -u root < scripts/init-complaint-system.sql"
+    "init-complaint-system": "mysql -u root < scripts/init-complaint-system.sql",
+    "reset-admin": "node scripts/reset-admin-password.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.0",
@@ -26,6 +28,8 @@
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
+    "@ngrok/ngrok": "^1.5.2",
+    "ngrok": "^4.3.3",
     "nodemon": "^2.0.22",
     "sqlite3": "^5.1.7"
   },

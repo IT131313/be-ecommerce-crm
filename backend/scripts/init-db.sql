@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) UNIQUE NOT NULL,
   username VARCHAR(255) UNIQUE NOT NULL,
   password VARCHAR(255) NOT NULL,
+  phone VARCHAR(25),
+  address TEXT,
   reset_pin VARCHAR(10),
   reset_pin_expiry DATETIME,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -69,6 +71,11 @@ CREATE TABLE IF NOT EXISTS orders (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   total_amount DECIMAL(10,2) NOT NULL,
+  shipping_address TEXT,
+  contact_phone VARCHAR(25),
+  shipping_method VARCHAR(10),
+  tracking_number VARCHAR(100),
+  shipped_at DATETIME,
   status VARCHAR(50) NOT NULL DEFAULT 'pending',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -161,3 +168,13 @@ CREATE INDEX idx_chat_rooms_user_id ON chat_rooms(user_id);
 CREATE INDEX idx_chat_messages_room_id ON chat_messages(room_id);
 CREATE INDEX idx_chat_messages_created_at ON chat_messages(created_at);
 
+-- Revoked tokens (for logout/blacklist)
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  token VARCHAR(1024) NOT NULL UNIQUE,
+  expires_at DATETIME,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Optional cleanup index
+CREATE INDEX idx_revoked_tokens_expires_at ON revoked_tokens(expires_at);

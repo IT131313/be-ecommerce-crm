@@ -1,81 +1,644 @@
-# Authentication Backend
 
-A Node.js Express backend with MySQL for user authentication system.
+## API Quick Reference
 
-## Features
+Base URL: `http://localhost:3000`
 
-- User registration with email and username
-- User login with email/username and password
-- Password reset functionality with PIN code
-- JWT-based authentication
-- MySQL database for data persistence
-- Google OAuth integration (configured separately)
+Gunakan header `Content-Type: application/json` untuk request berbasis JSON. Endpoint bertanda ?? atau ????? membutuhkan:
+`Authorization: Bearer your_jwt_token` untuk pengguna atau `Authorization: Bearer your_admin_jwt_token` untuk admin.
 
-## Prerequisites
+?? Public Endpoints (Tanpa Token)
 
-- Node.js (v14 or higher)
-- MySQL Server
-- npm or yarn
+1. Register User
+POST http://localhost:3000/api/auth/register
+Headers:
+  Content-Type: application/json
+Body:
+{
+  "email": "user@example.com",
+  "username": "user123",
+  "password": "secret123",
+  "confirmPassword": "secret123"
+}
 
-## Setup
+2. Login User
+POST http://localhost:3000/api/auth/login
+Headers:
+  Content-Type: application/json
+Body:
+{
+  "emailOrUsername": "user@example.com",
+  "password": "secret123"
+}
 
-1. Install dependencies:
-```bash
-npm install
-```
+3. Forgot Password (User)
+POST http://localhost:3000/api/auth/forgot-password
+Headers:
+  Content-Type: application/json
+Body:
+{
+  "email": "user@example.com"
+}
 
-2. Create .env file in the root directory and add your configuration:
-```
-DB_HOST=localhost
-DB_USER=root
-DB_PASSWORD=your_mysql_password
-DB_NAME=auth_db
-JWT_SECRET=your_jwt_secret_key
-GOOGLE_CLIENT_ID=your_google_client_id
-PORT=8000
-```
+4. Reset Password (User)
+POST http://localhost:3000/api/auth/reset-password
+Headers:
+  Content-Type: application/json
+Body:
+{
+  "email": "user@example.com",
+  "pin": "1234",
+  "newPassword": "newSecret123",
+  "confirmNewPassword": "newSecret123"
+}
 
-3. Initialize the database:
-```bash
-npm run init-db
-```
+5. Google Sign-In
+POST http://localhost:3000/api/auth/google
+Headers:
+  Content-Type: application/json
+Body:
+{
+  "idToken": "google_id_token"
+}
 
-## Running the Server
+6. Admin First-Time Setup
+POST http://localhost:3000/api/admin/auth/setup
+Headers:
+  Content-Type: application/json
+Body:
+{
+  "email": "admin@example.com",
+  "password": "superSecret123",
+  "name": "Super Admin",
+  "setupKey": "ADMIN_SETUP_KEY_jika_diperlukan"
+}
 
-Development mode with auto-reload:
-```bash
-npm run dev
-```
+7. Admin Login
+POST http://localhost:3000/api/admin/auth/login
+Headers:
+  Content-Type: application/json
+Body:
+{
+  "email": "admin@example.com",
+  "password": "superSecret123"
+}
 
-Production mode:
-```bash
-npm start
-```
+8. Admin Forgot Password
+POST http://localhost:3000/api/admin/auth/forgot-password
+Headers:
+  Content-Type: application/json
+Body:
+{
+  "email": "admin@example.com"
+}
 
-## API Endpoints
+9. Admin Reset Password
+POST http://localhost:3000/api/admin/auth/reset-password
+Headers:
+  Content-Type: application/json
+Body:
+{
+  "email": "admin@example.com",
+  "pin": "5678",
+  "newPassword": "NewAdmin123",
+  "confirmNewPassword": "NewAdmin123"
+}
 
-### Authentication
+10. GET Consultation Types
+GET http://localhost:3000/api/consultations/types
+Menampilkan daftar tipe konsultasi yang tersedia.
 
-- POST `/api/auth/register`
-  - Register a new user
-  - Body: `{ email, username, password, confirmPassword }`
+11. GET Design Categories
+GET http://localhost:3000/api/consultations/design-categories
+Menampilkan kategori desain interior.
 
-- POST `/api/auth/login`
-  - Login with email/username and password
-  - Body: `{ emailOrUsername, password }`
+12. GET Design Styles
+GET http://localhost:3000/api/consultations/design-styles
+Menampilkan gaya desain interior.
 
-- POST `/api/auth/forgot-password`
-  - Request password reset PIN
-  - Body: `{ email }`
+13. List Products
+GET http://localhost:3000/api/products
+Menampilkan seluruh katalog produk.
 
-- POST `/api/auth/reset-password`
-  - Reset password using PIN
-  - Body: `{ email, pin, newPassword, confirmNewPassword }`
+14. Products By Category
+GET http://localhost:3000/api/products/category/furniture
+Ganti `furniture` dengan nama kategori produk.
 
-## Security
+15. Product Ratings Overview
+GET http://localhost:3000/api/products/1/ratings
+Ringkasan rating dan ulasan untuk produk tertentu.
 
-- Passwords are hashed using bcrypt
-- JWT tokens for authentication
-- CORS enabled
-- Input validation and sanitization
-- Rate limiting (to be implemented)
+16. List Services
+GET http://localhost:3000/api/services
+Menampilkan seluruh layanan.
+
+17. Services By Category
+GET http://localhost:3000/api/services/category/interior
+Ganti `interior` dengan nama kategori layanan.
+
+18. Service Detail
+GET http://localhost:3000/api/services/1
+Detail spesifik suatu layanan.
+
+?? Protected Endpoints (Perlu Token Pengguna)
+
+19. Logout User
+POST http://localhost:3000/api/auth/logout
+Headers:
+  Authorization: Bearer your_jwt_token
+
+20. Book New Consultation
+POST http://localhost:3000/api/consultations
+Headers:
+  Authorization: Bearer your_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "serviceId": 1,
+  "consultationTypeId": 1,
+  "designCategoryId": 1,
+  "designStyleId": 1,
+  "consultationDate": "2024-08-15",
+  "consultationTime": "10:00:00",
+  "address": "Jl. Sudirman No. 123, Jakarta",
+  "notes": "Butuh konsultasi untuk renovasi ruang tamu"
+}
+
+21. Get User's Consultations
+GET http://localhost:3000/api/consultations
+Headers:
+  Authorization: Bearer your_jwt_token
+Menampilkan daftar konsultasi milik pengguna (alternatif ringkas: GET /api/users/consultations).
+
+22. Get Specific Consultation
+GET http://localhost:3000/api/consultations/1
+Headers:
+  Authorization: Bearer your_jwt_token
+Detail lengkap konsultasi tertentu.
+
+23. Cancel Consultation
+PATCH http://localhost:3000/api/consultations/1/cancel
+Headers:
+  Authorization: Bearer your_jwt_token
+Membatalkan konsultasi selama status belum selesai atau batal.
+
+24. Products You Can Rate
+GET http://localhost:3000/api/products/user/rateable
+Headers:
+  Authorization: Bearer your_jwt_token
+Daftar produk yang sudah dikirim dan bisa diberi rating.
+
+25. Submit Product Rating
+POST http://localhost:3000/api/products/1/rating
+Headers:
+  Authorization: Bearer your_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "rating": 5,
+  "review": "Kualitas produk sangat memuaskan!",
+  "orderId": 42
+}
+
+26. View Cart
+GET http://localhost:3000/api/cart
+Headers:
+  Authorization: Bearer your_jwt_token
+Melihat isi keranjang aktif.
+
+27. Add Item To Cart
+POST http://localhost:3000/api/cart/add
+Headers:
+  Authorization: Bearer your_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "productId": 3,
+  "quantity": 2
+}
+
+28. Update Cart Item Quantity
+PATCH http://localhost:3000/api/cart/update/5
+Headers:
+  Authorization: Bearer your_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "quantity": 1
+}
+
+29. Remove Cart Item
+DELETE http://localhost:3000/api/cart/remove/5
+Headers:
+  Authorization: Bearer your_jwt_token
+Menghapus item tertentu dari keranjang.
+
+30. Checkout Cart
+POST http://localhost:3000/api/cart/checkout
+Headers:
+  Authorization: Bearer your_jwt_token
+Memproses keranjang menjadi pesanan baru.
+
+Body (opsional untuk override profil):
+{
+  "shippingAddress": "Jl. Melati No. 10, Bandung",
+  "contactPhone": "+62 812-3456-7890",
+  "shippingMethod": "JNE" // atau "JNT"
+}
+
+Catatan:
+- Jika profil pengguna sudah memiliki alamat/telepon, nilainya otomatis terisi, namun tetap bisa diedit saat checkout dengan mengirim field di atas.
+- Field `shippingMethod` wajib diisi dan hanya menerima nilai "JNE" atau "JNT".
+
+31. Order History
+GET http://localhost:3000/api/orders
+Headers:
+  Authorization: Bearer your_jwt_token atau your_admin_jwt_token
+Menampilkan daftar pesanan milik pengguna. Jika token admin digunakan, akan menampilkan semua pesanan.
+
+32. Order Detail
+GET http://localhost:3000/api/orders/10
+Headers:
+  Authorization: Bearer your_jwt_token atau your_admin_jwt_token
+Detail item dan status pesanan tertentu. Pengguna hanya dapat melihat pesanan miliknya; admin dapat melihat pesanan mana pun.
+
+33. Cancel Order
+PATCH http://localhost:3000/api/orders/10/cancel
+Headers:
+  Authorization: Bearer your_jwt_token
+Membatalkan pesanan selama belum dikirim atau selesai.
+
+34. User Profile
+GET http://localhost:3000/api/users/profile
+Headers:
+  Authorization: Bearer your_jwt_token
+Profil dan ringkasan aktivitas pengguna.
+
+35. Update Profile
+PATCH http://localhost:3000/api/users/profile
+Headers:
+  Authorization: Bearer your_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "email": "user@example.com",
+  "username": "user_baru"
+}
+
+36. Change Password
+PATCH http://localhost:3000/api/users/change-password
+Headers:
+  Authorization: Bearer your_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "currentPassword": "secret123",
+  "newPassword": "newSecret123",
+  "confirmNewPassword": "newSecret123"
+}
+
+37. Delete Account
+DELETE http://localhost:3000/api/users/account
+Headers:
+  Authorization: Bearer your_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "password": "newSecret123"
+}
+
+38. Fetch Support Chat Room
+GET http://localhost:3000/api/chat/room
+Headers:
+  Authorization: Bearer your_jwt_token
+Mengambil atau membuat ruang chat dengan admin.
+
+39. Mark Chat Messages Read
+PATCH http://localhost:3000/api/chat/rooms/7/read
+Headers:
+  Authorization: Bearer your_jwt_token
+Menandai pesan lawan bicara sebagai sudah dibaca.
+
+40. View Warranty Tickets
+GET http://localhost:3000/api/complaints/tickets
+Headers:
+  Authorization: Bearer your_jwt_token
+Daftar tiket garansi aktif milik pengguna.
+
+41. Submit Warranty Complaint
+POST http://localhost:3000/api/complaints/create
+Headers:
+  Authorization: Bearer your_jwt_token
+  Content-Type: multipart/form-data
+Form-Data Fields:
+  ticket_id: 12
+  title: "Kompor tidak menyala"
+  reason: "Produk tidak dapat digunakan sejak hari pertama"
+  evidence_photo: (unggah foto JPG/PNG maks 5MB)
+
+42. List My Complaints
+GET http://localhost:3000/api/complaints/my-complaints
+Headers:
+  Authorization: Bearer your_jwt_token
+Melihat status setiap pengaduan.
+
+43. Complaint Detail
+GET http://localhost:3000/api/complaints/15
+Headers:
+  Authorization: Bearer your_jwt_token
+Detail pengaduan tertentu (admin juga dapat mengakses).
+
+????? Admin Endpoints (Token Admin)
+
+44. Admin Profile
+GET http://localhost:3000/api/admin/auth/profile
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+Mengambil informasi akun admin yang sedang login.
+
+45. Admin Logout
+POST http://localhost:3000/api/admin/auth/logout
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+46. List Users
+GET http://localhost:3000/api/admin/users
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+47. Create User
+POST http://localhost:3000/api/admin/users
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "email": "pelanggan@contoh.com",
+  "username": "pelanggan001",
+  "password": "secret123",
+  "confirmPassword": "secret123"
+}
+
+48. View User Detail
+GET http://localhost:3000/api/admin/users/5
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+49. Update User
+PUT http://localhost:3000/api/admin/users/5
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "email": "pelanggan@contoh.com",
+  "username": "pelanggan_baru"
+}
+
+50. Reset User Password
+PATCH http://localhost:3000/api/admin/users/5/reset-password
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "newPassword": "reset123",
+  "confirmPassword": "reset123"
+}
+
+51. Delete User
+DELETE http://localhost:3000/api/admin/users/5
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+52. List Orders (Admin)
+GET http://localhost:3000/api/admin/orders
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+53. Order Detail (Admin)
+GET http://localhost:3000/api/admin/orders/10
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+54. Dashboard Stats
+GET http://localhost:3000/api/admin/dashboard/stats
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+Ringkasan metrik (total pengguna, order, revenue, produk, order terbaru).
+
+55. Create Product (Admin)
+POST http://localhost:3000/api/admin/products
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: multipart/form-data
+Form-Data Fields:
+  name: "Sofa Minimalis"
+  description: "Sofa 3 dudukan nyaman"
+  category: "furniture"
+  price: 2500000
+  stock: 10
+  image (opsional): unggah file gambar
+
+56. Update Product
+PUT http://localhost:3000/api/admin/products/7
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: multipart/form-data atau application/json
+Body/Form fields hanya isi kolom yang diubah (name, description, category, price, stock, image).
+
+57. Delete Product
+DELETE http://localhost:3000/api/admin/products/7
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+58. Update Product Stock
+PATCH http://localhost:3000/api/admin/products/7/stock
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "stock": 25
+}
+
+59. Create Admin
+POST http://localhost:3000/api/admin/admins
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "email": "cs@contoh.com",
+  "password": "superSecret123",
+  "name": "Customer Support"
+}
+
+60. List Admins
+GET http://localhost:3000/api/admin/admins
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+61. Delete Admin
+DELETE http://localhost:3000/api/admin/admins/4
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+62. Update Order Status
+PATCH http://localhost:3000/api/orders/10/status
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "status": "shipped"
+}
+
+66. List Pending Shipments (Admin)
+GET http://localhost:3000/api/admin/shipments/pending
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+Menampilkan pesanan yang alamat & tujuan sudah diisi pelanggan, belum memiliki nomor resi, dan status pesanan masih `pending` atau `confirmed`.
+
+68. List Confirmed Shipments (Admin)
+GET http://localhost:3000/api/admin/shipments/confirmed
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+Menampilkan pesanan yang sudah berstatus `confirmed`, alamat tujuan sudah diisi, dan belum memiliki nomor resi (siap input resi).
+
+67. Set Tracking Number & Auto-Ship (Admin)
+PATCH http://localhost:3000/api/admin/orders/10/ship
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "trackingNumber": "JNE-RESI-001234"
+}
+Catatan:
+- Setelah disimpan, sistem otomatis mengubah status pesanan menjadi `shipped` dan mengisi `shipped_at`.
+- Field baru pada pesanan: `tracking_number` dan `shipped_at` akan muncul pada respons detail dan daftar pesanan.
+
+63. Get All Consultations (Admin)
+GET http://localhost:3000/api/consultations/admin/all
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+64. Update Consultation Status
+PATCH http://localhost:3000/api/consultations/5/status
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "status": "confirmed"
+}
+
+65. Add Consultation Type
+POST http://localhost:3000/api/consultations/types
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "name": "Virtual Reality Consultation",
+  "description": "Konsultasi menggunakan teknologi VR"
+}
+
+66. Add Design Category
+POST http://localhost:3000/api/consultations/design-categories
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "name": "Scandinavian",
+  "imageUrl": "/images/scandinavian.jpg"
+}
+
+67. Add Design Style
+POST http://localhost:3000/api/consultations/design-styles
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "name": "Bohemian",
+  "imageUrl": "/images/bohemian.jpg"
+}
+
+68. View Complaints Board
+GET http://localhost:3000/api/admin/complaints
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+Tambahkan query ?status=pending atau ?priority=high untuk memfilter.
+
+69. Accept Complaint
+PATCH http://localhost:3000/api/admin/complaints/15/accept
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+Membuka chat room dan menetapkan admin penanggung jawab.
+
+70. Reject Complaint
+PATCH http://localhost:3000/api/admin/complaints/15/reject
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "admin_comment": "Keluhan tidak valid karena lampirannya tidak lengkap"
+}
+
+71. Update Complaint Priority
+PATCH http://localhost:3000/api/admin/complaints/15/priority
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "priority": "high"
+}
+
+72. Resolve Complaint
+PATCH http://localhost:3000/api/admin/complaints/15/resolve
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+Menandai pengaduan selesai dan menutup chat room terkait.
+
+73. Complaint Stats Overview
+GET http://localhost:3000/api/admin/complaints/stats/overview
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+74. List Chat Rooms
+GET http://localhost:3000/api/chat/rooms
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+75. Chat Room Messages
+GET http://localhost:3000/api/chat/rooms/7/messages?limit=50&page=1
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+76. Claim Chat Room
+PATCH http://localhost:3000/api/chat/rooms/7/assign
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+Mengambil alih percakapan pengguna.
+
+77. Close Chat Room
+PATCH http://localhost:3000/api/chat/rooms/7/close
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+78. Chat Stats
+GET http://localhost:3000/api/chat/stats
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+
+79. Mark Messages Read (Admin)
+PATCH http://localhost:3000/api/chat/rooms/7/read
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+Menandai pesan pengguna sebagai sudah dibaca (sama endpoint dengan #39).
+
+

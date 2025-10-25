@@ -4,7 +4,32 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../config/database');
+const { userOnlyMiddleware } = require('../middleware/auth');
 const { sendResetPinEmail } = require('../config/email');
+const { OAuth2Client } = require('google-auth-library');
+
+const googleClientId = process.env.GOOGLE_CLIENT_ID;
+const googleClient = googleClientId ? new OAuth2Client(googleClientId) : null;
+
+async function generateUniqueUsername(base) {
+  let username = base;
+  let counter = 0;
+  // Ensure alphanumeric + underscores only, and reasonable length
+  username = (username || 'user')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 20) || 'user';
+
+  // Try base, then base1, base2, ... until available
+  while (true) {
+    const candidate = counter === 0 ? username : `${username}${counter}`;
+    const exists = await db.get('SELECT id FROM users WHERE username = ?', [candidate]);
+    if (!exists) return candidate;
+    counter += 1;
+  }
+}
 
 // Register endpoint
 router.post('/register', async (req, res) => {
@@ -159,3 +184,106 @@ router.post('/reset-password', async (req, res) => {
 });
 
 module.exports = router;
+ 
+// Logout endpoint (user)
+router.post('/logout', userOnlyMiddleware, async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      return res.status(400).json({ error: 'Token not provided' });
+    }
+
+    // Derive expiry from token payload if present
+    const decoded = jwt.decode(token);
+    let expiresAt = null;
+    if (decoded && decoded.exp) {
+      expiresAt = new Date(decoded.exp * 1000);
+    }
+
+    try {
+      await db.run(
+        'INSERT INTO revoked_tokens (token, expires_at) VALUES (?, ?)',
+        [token, expiresAt]
+      );
+    } catch (e) {
+      // If duplicate (already revoked), still respond success
+      // MySQL error code for duplicate key is ER_DUP_ENTRY (1062)
+      if (e && (e.code === 'ER_DUP_ENTRY' || e.errno === 1062)) {
+        return res.json({ message: 'Logged out' });
+      }
+      throw e;
+    }
+
+    return res.json({ message: 'Logged out' });
+  } catch (error) {
+    console.error('Logout error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Google Sign-In (no Firebase) — verify ID token then login/register
+router.post('/google', async (req, res) => {
+  try {
+    if (!googleClientId) {
+      return res.status(500).json({ error: 'Google Sign-In not configured (missing GOOGLE_CLIENT_ID)' });
+    }
+
+    const { idToken } = req.body || {};
+    if (!idToken) {
+      return res.status(400).json({ error: 'idToken is required' });
+    }
+
+    // Verify ID token against configured audience (your Web Client ID)
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: googleClientId,
+    });
+    const payload = ticket.getPayload();
+    if (!payload) {
+      return res.status(401).json({ error: 'Invalid Google token' });
+    }
+
+    const {
+      sub: googleSub,
+      email,
+      email_verified: emailVerified,
+      name,
+      picture,
+    } = payload;
+
+    if (!email || emailVerified === false) {
+      return res.status(400).json({ error: 'Google account email not verified' });
+    }
+
+    // Find or create user by email
+    let user = await db.get('SELECT * FROM users WHERE email = ?', [email]);
+
+    if (!user) {
+      // Create a new user with generated username and random password
+      const baseFromEmail = email.split('@')[0];
+      const username = await generateUniqueUsername(baseFromEmail);
+      const bcrypt = require('bcryptjs');
+      const randomPassword = require('crypto').randomBytes(24).toString('hex');
+      const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+      await db.run(
+        'INSERT INTO users (email, username, password) VALUES (?, ?, ?)',
+        [email, username, hashedPassword]
+      );
+      user = await db.get('SELECT * FROM users WHERE email = ?', [email]);
+    }
+
+    // Issue our own JWT for session/auth in this app
+    const token = jwt.sign(
+      { id: user.id, email: user.email, username: user.username, provider: 'google' },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    return res.json({ message: 'Google login successful', token });
+  } catch (error) {
+    console.error('Google login error:', error);
+    return res.status(401).json({ error: 'Failed to verify Google token' });
+  }
+});
