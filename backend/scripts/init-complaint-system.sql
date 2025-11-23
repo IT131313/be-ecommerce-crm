@@ -1,3 +1,6 @@
+-- Ensure we operate on the correct database
+USE auth_db;
+
 -- Create warranty tickets table
 CREATE TABLE IF NOT EXISTS warranty_tickets (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -58,14 +61,16 @@ CREATE INDEX idx_complaints_status ON complaints(status);
 CREATE INDEX idx_complaints_priority ON complaints(priority);
 CREATE INDEX idx_complaints_created_at ON complaints(created_at);
 
--- Add trigger to automatically create warranty tickets when order is confirmed
+-- Add trigger to automatically create warranty tickets when order is completed
+DROP TRIGGER IF EXISTS create_warranty_tickets_after_order_confirmed;
+DROP TRIGGER IF EXISTS create_warranty_tickets_after_order_completed;
 DELIMITER //
-CREATE TRIGGER create_warranty_tickets_after_order_confirmed
+CREATE TRIGGER create_warranty_tickets_after_order_completed
 AFTER UPDATE ON orders
 FOR EACH ROW
 BEGIN
-  -- Only create tickets when status changes to 'confirmed'
-  IF NEW.status = 'confirmed' AND OLD.status != 'confirmed' THEN
+  -- Only create tickets when status changes to 'completed'
+  IF NEW.status = 'completed' AND OLD.status != 'completed' THEN
     INSERT INTO warranty_tickets (order_id, user_id, product_id, issue_date, expiry_date)
     SELECT 
       NEW.id,

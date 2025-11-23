@@ -55,8 +55,8 @@ router.post('/register', async (req, res) => {
     }
 
     await db.run(
-      'INSERT INTO users (email, username, password) VALUES (?, ?, ?)',
-      [email, username, hashedPassword]
+      'INSERT INTO users (email, username, password, customer_tag, customer_tag_source) VALUES (?, ?, ?, ?, "auto")',
+      [email, username, hashedPassword, 'prospect_new']
     );
     res.status(201).json({ message: 'User registered successfully' });
   } catch (error) {

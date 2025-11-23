@@ -174,7 +174,9 @@ router.post('/checkout', userOnlyMiddleware, async (req, res) => {
       shipping_address,
       contact_phone,
       shippingMethod,
-      shipping_method
+      shipping_method,
+      shippingCost,
+      shipping_cost
     } = req.body || {};
 
     // Get cart items
@@ -203,8 +205,8 @@ router.post('/checkout', userOnlyMiddleware, async (req, res) => {
       }
     }
 
-    // Calculate total amount
-    const totalAmount = cartItems.reduce((sum, item) =>
+    // Calculate items subtotal
+    const itemsSubtotal = cartItems.reduce((sum, item) =>
       sum + (item.price * item.quantity), 0
     );
 
@@ -216,6 +218,7 @@ router.post('/checkout', userOnlyMiddleware, async (req, res) => {
     let finalShippingAddress = shippingAddress ?? shipping_address ?? userProfile?.address ?? null;
     let finalContactPhone = contactPhone ?? contact_phone ?? userProfile?.phone ?? null;
     let finalShippingMethod = (shippingMethod ?? shipping_method ?? null);
+    let providedShippingCost = (shippingCost ?? shipping_cost ?? 0);
 
     if (finalShippingMethod !== null && finalShippingMethod !== undefined) {
       finalShippingMethod = String(finalShippingMethod).trim().toUpperCase();
@@ -259,10 +262,26 @@ router.post('/checkout', userOnlyMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Contact phone contains invalid characters' });
     }
 
+    // Validate shipping cost (ongkir)
+    if (typeof providedShippingCost === 'string') {
+      providedShippingCost = providedShippingCost.replace(/,/g, '.');
+    }
+
+    const parsedShipping = Number(providedShippingCost);
+    if (!Number.isFinite(parsedShipping) || parsedShipping < 0) {
+      return res.status(400).json({ error: 'Invalid shipping cost' });
+    }
+
+    // Round to 2 decimals and bound to DECIMAL(10,2)
+    const shippingCostValue = Math.min(99999999.99, Math.round(parsedShipping * 100) / 100);
+
+    // Final total = items subtotal + shipping cost
+    const totalAmount = Math.round((itemsSubtotal + shippingCostValue) * 100) / 100;
+
     // Create order
     const orderResult = await db.run(
-      'INSERT INTO orders (user_id, total_amount, shipping_address, contact_phone, shipping_method) VALUES (?, ?, ?, ?, ?)',
-      [req.user.id, totalAmount, finalShippingAddress, finalContactPhone, finalShippingMethod]
+      'INSERT INTO orders (user_id, total_amount, shipping_cost, shipping_address, contact_phone, shipping_method) VALUES (?, ?, ?, ?, ?, ?)',
+      [req.user.id, totalAmount, shippingCostValue, finalShippingAddress, finalContactPhone, finalShippingMethod]
     );
 
     // Add order items and update product stock
@@ -290,6 +309,8 @@ router.post('/checkout', userOnlyMiddleware, async (req, res) => {
       shippingAddress: finalShippingAddress,
       contactPhone: finalContactPhone,
       shippingMethod: finalShippingMethod,
+      itemsSubtotal,
+      shippingCost: shippingCostValue,
       totalAmount
     });
   } catch (error) {

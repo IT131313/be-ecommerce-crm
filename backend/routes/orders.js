@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { authMiddleware, adminAuthMiddleware, userOnlyMiddleware } = require('../middleware/auth');
+const { applyAutoTag } = require('../services/customerTags');
 
 // Get orders list
 // - Users: only their own orders
@@ -17,6 +18,7 @@ router.get('/', authMiddleware, async (req, res) => {
           o.id,
           o.user_id,
           o.total_amount,
+          o.shipping_cost,
           o.shipping_address,
           o.contact_phone,
           o.shipping_method,
@@ -39,6 +41,7 @@ router.get('/', authMiddleware, async (req, res) => {
         SELECT 
           o.id,
           o.total_amount,
+          o.shipping_cost,
           o.shipping_address,
           o.contact_phone,
           o.shipping_method,
@@ -76,6 +79,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
           o.id,
           o.user_id,
           o.total_amount,
+          o.shipping_cost,
           o.shipping_address,
           o.contact_phone,
           o.shipping_method,
@@ -95,6 +99,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
         SELECT 
           o.id,
           o.total_amount,
+          o.shipping_cost,
           o.shipping_address,
           o.contact_phone,
           o.shipping_method,
@@ -196,6 +201,67 @@ router.patch('/:id/cancel', userOnlyMiddleware, async (req, res) => {
   }
 });
 
+// Mark shipped order as completed (user confirms receipt)
+router.patch('/:id/complete', userOnlyMiddleware, async (req, res) => {
+  try {
+    const order = await db.get(`
+      SELECT id, status, user_id
+      FROM orders
+      WHERE id = ? AND user_id = ?
+    `, [req.params.id, req.user.id]);
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    if (order.status === 'completed') {
+      return res.status(400).json({ error: 'Order already completed' });
+    }
+
+    if (order.status === 'cancelled') {
+      return res.status(400).json({ error: 'Cancelled orders cannot be completed' });
+    }
+
+    if (order.status !== 'shipped') {
+      return res.status(400).json({ error: 'Order can only be completed after it has been shipped' });
+    }
+
+    await db.run(`
+      UPDATE orders 
+      SET status = 'completed'
+      WHERE id = ?
+    `, [req.params.id]);
+
+    await db.run(`
+      INSERT INTO warranty_tickets (order_id, user_id, product_id, issue_date, expiry_date)
+      SELECT
+        o.id,
+        o.user_id,
+        oi.product_id,
+        CURDATE(),
+        DATE_ADD(CURDATE(), INTERVAL 365 DAY)
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.id = ?
+      ON DUPLICATE KEY UPDATE
+        status = 'active',
+        issue_date = VALUES(issue_date),
+        expiry_date = VALUES(expiry_date)
+    `, [req.params.id]);
+
+    await applyAutoTag(order.user_id);
+
+    res.json({
+      message: 'Order marked as completed. Thank you for confirming receipt.',
+      orderId: req.params.id,
+      newStatus: 'completed'
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Update order status (admin functionality - can be extended later)
 router.patch('/:id/status', adminAuthMiddleware, async (req, res) => {
   const { status } = req.body;
@@ -209,7 +275,7 @@ router.patch('/:id/status', adminAuthMiddleware, async (req, res) => {
   try {
     // Admin can update any order status
     const order = await db.get(`
-      SELECT id, status as current_status
+      SELECT id, user_id, status as current_status
       FROM orders
       WHERE id = ?
     `, [req.params.id]);
@@ -223,6 +289,29 @@ router.patch('/:id/status', adminAuthMiddleware, async (req, res) => {
       SET status = ? 
       WHERE id = ?
     `, [status, req.params.id]);
+
+    if (['completed', 'shipped'].includes(status)) {
+      await applyAutoTag(order.user_id);
+    }
+
+    if (status === 'completed' && order.current_status !== 'completed') {
+      await db.run(`
+        INSERT INTO warranty_tickets (order_id, user_id, product_id, issue_date, expiry_date)
+        SELECT
+          o.id,
+          o.user_id,
+          oi.product_id,
+          CURDATE(),
+          DATE_ADD(CURDATE(), INTERVAL 365 DAY)
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        WHERE o.id = ?
+        ON DUPLICATE KEY UPDATE
+          status = 'active',
+          issue_date = VALUES(issue_date),
+          expiry_date = VALUES(expiry_date)
+      `, [req.params.id]);
+    }
 
     res.json({ 
       message: 'Order status updated successfully by admin',

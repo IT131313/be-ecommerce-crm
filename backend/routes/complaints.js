@@ -3,7 +3,9 @@ const router = express.Router();
 const db = require('../config/database');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 const { authMiddleware, adminAuthMiddleware, userOnlyMiddleware } = require('../middleware/auth');
+const { applyAutoTag } = require('../services/customerTags');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -107,9 +109,61 @@ router.post('/create', userOnlyMiddleware, upload.single('evidence_photo'), asyn
       WHERE id = ?
     `, [ticket_id]);
 
+    await applyAutoTag(req.user.id);
+
     res.status(201).json({
       message: 'Complaint submitted successfully',
       complaint_id: result.lastID
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Resubmit a rejected complaint with new evidence/reason
+router.patch('/:complaintId/resubmit', userOnlyMiddleware, upload.single('evidence_photo'), async (req, res) => {
+  const { complaintId } = req.params;
+  const { reason } = req.body;
+
+  try {
+    const complaint = await db.get(`
+      SELECT id, user_id, status, evidence_photo
+      FROM complaints
+      WHERE id = ? AND user_id = ? AND status = 'rejected'
+    `, [complaintId, req.user.id]);
+
+    if (!complaint) {
+      return res.status(404).json({
+        error: 'Complaint not found or not eligible for resubmission'
+      });
+    }
+
+    const shouldUpdateReason = reason && reason.trim() !== '';
+    let newEvidencePath = complaint.evidence_photo;
+
+    if (req.file) {
+      newEvidencePath = req.file.path;
+
+      if (complaint.evidence_photo) {
+        fs.promises.unlink(complaint.evidence_photo).catch(() => {});
+      }
+    }
+
+    await db.run(`
+      UPDATE complaints
+      SET
+        reason = COALESCE(?, reason),
+        evidence_photo = ?,
+        status = 'pending',
+        admin_id = NULL,
+        admin_comment = NULL,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [shouldUpdateReason ? reason : null, newEvidencePath, complaintId]);
+
+    res.json({
+      message: 'Complaint resubmitted successfully'
     });
   } catch (error) {
     console.error(error);

@@ -302,11 +302,11 @@ router.get('/complaints/stats/overview', adminAuthMiddleware, async (req, res) =
       GROUP BY priority
     `);
 
-    // Get recent complaints (last 30 days)
+    // Get recent complaints (last 30 days) - MySQL/MariaDB syntax
     const recentComplaints = await db.get(`
       SELECT COUNT(*) as count
       FROM complaints
-      WHERE created_at >= DATE('now', '-30 days')
+      WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
     `);
 
     // Get pending complaints count
@@ -316,9 +316,9 @@ router.get('/complaints/stats/overview', adminAuthMiddleware, async (req, res) =
       WHERE status = 'pending'
     `);
 
-    // Get average resolution time
+    // Get average resolution time (in days) - MySQL/MariaDB syntax
     const avgResolutionTime = await db.get(`
-      SELECT AVG(JULIANDAY(resolved_at) - JULIANDAY(created_at)) as avg_days
+      SELECT AVG(TIMESTAMPDIFF(DAY, created_at, resolved_at)) as avg_days
       FROM complaints
       WHERE status = 'resolved' AND resolved_at IS NOT NULL
     `);

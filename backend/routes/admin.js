@@ -3,6 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { adminAuthMiddleware } = require('../middleware/auth');
+const { applyAutoTag, setManualTag, resetToAuto, TAGS, VALID_TAGS } = require('../services/customerTags');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -58,6 +59,24 @@ async function deleteProductImage(relativePath) {
       console.error('Failed to delete old product image:', error);
     }
   }
+}
+
+const TAG_ALIASES = {
+  bermasalah: TAGS.NEEDS_ATTENTION,
+  problematic: TAGS.NEEDS_ATTENTION,
+  resiko: TAGS.NEEDS_ATTENTION,
+  risiko: TAGS.NEEDS_ATTENTION,
+  perlu_perhatian: TAGS.NEEDS_ATTENTION,
+  loyal: TAGS.LOYAL,
+  prospek_baru: TAGS.PROSPECT_NEW,
+  prospect_new: TAGS.PROSPECT_NEW,
+  prospect: TAGS.PROSPECT_NEW
+};
+
+function normalizeTagAlias(tag) {
+  if (!tag) return null;
+  const normalized = String(tag).toLowerCase();
+  return TAG_ALIASES[normalized] || tag;
 }
 
 // Create new user (admin only)
@@ -120,8 +139,8 @@ router.post('/users', adminAuthMiddleware, async (req, res) => {
     
     // Create user
     const result = await db.run(
-      'INSERT INTO users (email, username, password, address, phone) VALUES (?, ?, ?, ?, ?)',
-      [email, username, hashedPassword, sanitizedAddress || null, validatedPhone || null]
+      'INSERT INTO users (email, username, password, address, phone, customer_tag, customer_tag_source) VALUES (?, ?, ?, ?, ?, ?, "auto")',
+      [email, username, hashedPassword, sanitizedAddress || null, validatedPhone || null, 'prospect_new']
     );
     
     res.status(201).json({ 
@@ -132,7 +151,9 @@ router.post('/users', adminAuthMiddleware, async (req, res) => {
         email,
         username,
         address: sanitizedAddress || null,
-        phone: validatedPhone || null
+        phone: validatedPhone || null,
+        customer_tag: 'prospect_new',
+        customer_tag_source: 'auto'
       }
     });
   } catch (error) {
@@ -145,7 +166,7 @@ router.post('/users', adminAuthMiddleware, async (req, res) => {
 router.get('/users', adminAuthMiddleware, async (req, res) => {
   try {
     const users = await db.all(`
-      SELECT id, email, username, address, phone, created_at 
+      SELECT id, email, username, address, phone, customer_tag, customer_tag_source, created_at 
       FROM users 
       ORDER BY created_at DESC
     `);
@@ -156,11 +177,63 @@ router.get('/users', adminAuthMiddleware, async (req, res) => {
   }
 });
 
+// Get customer segments with activity counts (admin only)
+router.get('/customers/segments', adminAuthMiddleware, async (req, res) => {
+  try {
+    const customers = await db.all(`
+      SELECT 
+        u.id,
+        u.username,
+        u.email,
+        u.customer_tag,
+        u.customer_tag_source,
+        u.created_at,
+        COALESCE(o.completed_count, 0) AS completed_orders,
+        COALESCE(c.claim_count, 0) AS warranty_claims
+      FROM users u
+      LEFT JOIN (
+        SELECT user_id, COUNT(*) AS completed_count
+        FROM orders
+        WHERE status IN ('completed', 'shipped')
+        GROUP BY user_id
+      ) o ON o.user_id = u.id
+      LEFT JOIN (
+        SELECT user_id, COUNT(*) AS claim_count
+        FROM complaints
+        GROUP BY user_id
+      ) c ON c.user_id = u.id
+      ORDER BY u.created_at DESC
+    `);
+
+    const enriched = [];
+    for (const customer of customers) {
+      if (customer.customer_tag_source !== 'manual') {
+        const result = await applyAutoTag(customer.id);
+        customer.customer_tag = result.tag || customer.customer_tag;
+        customer.customer_tag_source = 'auto';
+      }
+      enriched.push(customer);
+    }
+
+    res.json({
+      customers: enriched,
+      tagOptions: {
+        prospect_new: 'Prospek Baru',
+        loyal: 'Loyal',
+        needs_attention: 'Perlu Perhatian'
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get specific user by ID (admin only)
 router.get('/users/:id', adminAuthMiddleware, async (req, res) => {
   try {
     const user = await db.get(`
-      SELECT id, email, username, address, phone, created_at 
+      SELECT id, email, username, address, phone, customer_tag, customer_tag_source, created_at 
       FROM users 
       WHERE id = ?
     `, [req.params.id]);
@@ -185,6 +258,43 @@ router.get('/users/:id', adminAuthMiddleware, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Manually adjust customer tag or reset to auto (admin only)
+router.patch('/users/:id/tag', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { tag, mode } = req.body || {};
+    const normalizedTag = normalizeTagAlias(tag);
+    const wantsAuto = (mode === 'auto') || (normalizedTag && String(normalizedTag).toLowerCase() === 'auto');
+
+    if (wantsAuto) {
+      const result = await resetToAuto(req.params.id);
+      return res.json({
+        message: 'Customer tag recalculated automatically',
+        tag: result.tag,
+        source: 'auto'
+      });
+    }
+
+    if (!normalizedTag) {
+      return res.status(400).json({ error: 'Tag is required (prospect_new, loyal, needs_attention)' });
+    }
+
+    const canonicalTag = normalizeTagAlias(normalizedTag);
+    if (!VALID_TAGS.has(canonicalTag)) {
+      return res.status(400).json({ error: 'Invalid tag. Use prospect_new, loyal, or needs_attention' });
+    }
+
+    const result = await setManualTag(req.params.id, canonicalTag);
+    res.json({
+      message: 'Customer tag updated',
+      tag: result.tag,
+      source: 'manual'
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.status || 500).json({ error: error.message || 'Internal server error' });
   }
 });
 

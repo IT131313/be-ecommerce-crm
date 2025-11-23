@@ -48,6 +48,13 @@ router.get('/room', userOnlyMiddleware, async (req, res) => {
       ORDER BY cm.created_at ASC
     `, [room.id]);
 
+    // Normalize messages for FE compatibility
+    const normalizedMessages = messages.map((m) => ({
+      ...m,
+      sender: m.sender_type, // alias expected by some FE clients
+      createdAt: m.created_at,
+    }));
+
     res.json({
       room: {
         id: room.id,
@@ -59,7 +66,7 @@ router.get('/room', userOnlyMiddleware, async (req, res) => {
         created_at: room.created_at,
         updated_at: room.updated_at
       },
-      messages
+      messages: normalizedMessages
     });
   } catch (error) {
     console.error(error);
@@ -92,7 +99,21 @@ router.get('/rooms', adminAuthMiddleware, async (req, res) => {
       ORDER BY cr.updated_at DESC
     `);
 
-    res.json(rooms);
+    // Add camelCase aliases and sender alias for FE compatibility
+    const normalizedRooms = rooms.map((r) => ({
+      ...r,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      lastMessage: r.last_message,
+      lastMessageTime: r.last_message_time,
+      lastSenderType: r.last_sender_type,
+      lastSender: r.last_sender_type, // alias 'sender' style
+      unreadCount: r.unread_count,
+      userEmail: r.user_email,
+      adminName: r.admin_name,
+    }));
+
+    res.json(normalizedRooms);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
@@ -140,6 +161,13 @@ router.get('/rooms/:roomId/messages', adminAuthMiddleware, async (req, res) => {
       WHERE room_id = ?
     `, [roomId]);
 
+    // Normalize messages for FE compatibility
+    const normalizedAdminMessages = messages.map((m) => ({
+      ...m,
+      sender: m.sender_type,
+      createdAt: m.created_at,
+    }));
+
     res.json({
       room: {
         id: room.id,
@@ -151,7 +179,7 @@ router.get('/rooms/:roomId/messages', adminAuthMiddleware, async (req, res) => {
         created_at: room.created_at,
         updated_at: room.updated_at
       },
-      messages: messages.reverse(), // Reverse to show oldest first
+      messages: normalizedAdminMessages.reverse(), // Reverse to show oldest first
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),

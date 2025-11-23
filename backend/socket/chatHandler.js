@@ -177,9 +177,16 @@ const handleChatConnection = (io) => {
           LIMIT 50
         `, [roomId]);
 
+        // Normalize payload for FE expectations
+        const normalizedMessages = messages.map((m) => ({
+          ...m,
+          sender: m.sender_type, // alias for FE compatibility
+          createdAt: m.created_at, // keep existing field too
+        }));
+
         socket.emit('joined_room', {
           roomId,
-          messages
+          messages: normalizedMessages
         });
 
         // Notify other participants
@@ -231,7 +238,9 @@ const handleChatConnection = (io) => {
 
         const messageData = {
           ...savedMessage,
-          sender_name: senderName
+          sender_name: senderName,
+          sender: savedMessage.sender_type, // alias for FE compatibility
+          createdAt: savedMessage.created_at
         };
 
         // Send to all participants in the room
@@ -274,7 +283,8 @@ const handleChatConnection = (io) => {
         
         socket.to(`room_${roomId}`).emit('messages_read', {
           readerId: socket.userId,
-          readerType: socket.userType
+          readerType: socket.userType,
+          reader: socket.userType // alias for FE compatibility
         });
       } catch (error) {
         console.error('Error marking messages as read:', error);
@@ -308,7 +318,19 @@ const handleChatConnection = (io) => {
           ORDER BY cr.updated_at DESC
         `);
 
-        socket.emit('active_rooms', activeRooms);
+        // Add camelCase aliases without breaking existing FE
+        const normalizedRooms = activeRooms.map((r) => ({
+          ...r,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+          lastMessage: r.last_message,
+          lastMessageTime: r.last_message_time,
+          unreadCount: r.unread_count,
+          userEmail: r.user_email,
+          adminName: r.admin_name
+        }));
+
+        socket.emit('active_rooms', normalizedRooms);
       } catch (error) {
         console.error('Error getting active rooms:', error);
         socket.emit('error', { message: 'Failed to get active rooms' });

@@ -8,7 +8,7 @@ const { userOnlyMiddleware } = require('../middleware/auth');
 router.get('/profile', userOnlyMiddleware, async (req, res) => {
   try {
     const user = await db.get(`
-      SELECT id, email, username, address, phone, created_at 
+      SELECT id, email, username, address, phone, customer_tag, customer_tag_source, created_at 
       FROM users 
       WHERE id = ?
     `, [req.user.id]);
@@ -38,6 +38,8 @@ router.get('/profile', userOnlyMiddleware, async (req, res) => {
         username: user.username,
         address: user.address || null,
         phone: user.phone || null,
+        customer_tag: user.customer_tag,
+        customer_tag_source: user.customer_tag_source,
         created_at: user.created_at
       },
       stats: {
@@ -273,7 +275,12 @@ router.get('/consultations', userOnlyMiddleware, async (req, res) => {
         c.consultation_date,
         c.consultation_time,
         c.status,
+        c.payment_status,
+        c.cancellation_fee_amount,
+        c.final_delivery_status,
         c.created_at,
+        c.reference_image_primary,
+        c.reference_image_secondary,
         s.name as service_name,
         ct.name as consultation_type,
         dc.name as design_category,

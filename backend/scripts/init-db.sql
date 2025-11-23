@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) UNIQUE NOT NULL,
   username VARCHAR(255) UNIQUE NOT NULL,
   password VARCHAR(255) NOT NULL,
+  customer_tag VARCHAR(50) NOT NULL DEFAULT 'prospect_new',
+  customer_tag_source ENUM('auto', 'manual') NOT NULL DEFAULT 'auto',
   phone VARCHAR(25),
   address TEXT,
   reset_pin VARCHAR(10),
@@ -71,6 +73,7 @@ CREATE TABLE IF NOT EXISTS orders (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   total_amount DECIMAL(10,2) NOT NULL,
+  shipping_cost DECIMAL(10,2) NOT NULL DEFAULT 0,
   shipping_address TEXT,
   contact_phone VARCHAR(25),
   shipping_method VARCHAR(10),
@@ -91,6 +94,30 @@ CREATE TABLE IF NOT EXISTS order_items (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+-- Create payment transactions table
+CREATE TABLE IF NOT EXISTS payment_transactions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  reference_type ENUM('order', 'consultation') NOT NULL,
+  reference_id INT NOT NULL,
+  purpose VARCHAR(50) NOT NULL,
+  order_code VARCHAR(50) NOT NULL UNIQUE,
+  user_id INT,
+  snap_token VARCHAR(255),
+  redirect_url VARCHAR(500),
+  gross_amount DECIMAL(12,2) NOT NULL,
+  currency VARCHAR(10) DEFAULT 'IDR',
+  transaction_status VARCHAR(50) DEFAULT 'token',
+  payment_type VARCHAR(50),
+  fraud_status VARCHAR(50),
+  settlement_time DATETIME,
+  midtrans_transaction_id VARCHAR(100),
+  payment_response TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_payment_reference (reference_type, reference_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- Create consultation types table
@@ -123,19 +150,77 @@ CREATE TABLE IF NOT EXISTS consultations (
   user_id INT NOT NULL,
   service_id INT NOT NULL,
   consultation_type_id INT NOT NULL,
-  design_category_id INT NOT NULL,
-  design_style_id INT NOT NULL,
+  design_category_id INT,
+  design_style_id INT,
   consultation_date DATE NOT NULL,
   consultation_time TIME,
   address TEXT,
   notes TEXT,
+  pre_contract_meet_link VARCHAR(500),
+  pre_contract_meet_datetime DATETIME,
+  reference_image_primary VARCHAR(500),
+  reference_image_secondary VARCHAR(500),
   status VARCHAR(50) NOT NULL DEFAULT 'pending',
+  payment_status VARCHAR(50) NOT NULL DEFAULT 'not_ready',
+  cancellation_fee_percent DECIMAL(5,2) DEFAULT 10.00,
+  cancellation_fee_amount DECIMAL(12,2) DEFAULT 0,
+  final_delivery_status VARCHAR(50) NOT NULL DEFAULT 'not_ready',
+  final_delivery_note TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE,
   FOREIGN KEY (consultation_type_id) REFERENCES consultation_types(id) ON DELETE CASCADE,
   FOREIGN KEY (design_category_id) REFERENCES design_categories(id) ON DELETE CASCADE,
   FOREIGN KEY (design_style_id) REFERENCES design_styles(id) ON DELETE CASCADE
+);
+
+-- Create consultation contracts table
+CREATE TABLE IF NOT EXISTS consultation_contracts (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  consultation_id INT NOT NULL,
+  admin_id INT,
+  project_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
+  file_path VARCHAR(500) NOT NULL,
+  original_filename VARCHAR(255) NOT NULL,
+  uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (consultation_id) REFERENCES consultations(id) ON DELETE CASCADE,
+  FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
+);
+
+-- Create consultation timeline items table
+CREATE TABLE IF NOT EXISTS consultation_timeline_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  contract_id INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  activity_type ENUM('progress', 'meeting', 'finalization') DEFAULT 'progress',
+  status ENUM('pending', 'in_progress', 'completed', 'cancel') DEFAULT 'pending',
+  due_date DATE,
+  meeting_datetime DATETIME,
+  meeting_link VARCHAR(500),
+  result_file_path VARCHAR(500),
+  result_original_filename VARCHAR(255),
+  result_uploaded_at DATETIME,
+  result_uploaded_by_admin_id INT,
+  order_index INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (contract_id) REFERENCES consultation_contracts(id) ON DELETE CASCADE,
+  FOREIGN KEY (result_uploaded_by_admin_id) REFERENCES admins(id) ON DELETE SET NULL
+);
+
+-- Consultation timeline comments (conversation per item)
+CREATE TABLE IF NOT EXISTS consultation_timeline_comments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  timeline_item_id INT NOT NULL,
+  author_type ENUM('user', 'admin') NOT NULL,
+  author_user_id INT,
+  author_admin_id INT,
+  message TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (timeline_item_id) REFERENCES consultation_timeline_items(id) ON DELETE CASCADE,
+  FOREIGN KEY (author_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (author_admin_id) REFERENCES admins(id) ON DELETE SET NULL
 );
 
 -- Create chat rooms table

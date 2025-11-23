@@ -55,6 +55,18 @@ Body:
 - evidence_photo (optional): File foto bukti
 ```
 
+#### Resubmit Rejected Complaint
+```
+PATCH /api/complaints/:complaintId/resubmit
+Headers: Authorization: Bearer <token>
+Content-Type: multipart/form-data
+
+Body:
+- reason (optional): Alasan pengaduan yang diperbarui
+- evidence_photo (optional): File foto bukti baru
+```
+Mengirim ulang pengaduan yang berstatus `rejected`. Data baru akan menggantikan alasan/bukti lama dan status kembali menjadi `pending` untuk ditinjau ulang admin.
+
 #### Get My Complaints
 ```
 GET /api/complaints/my-complaints
@@ -157,7 +169,7 @@ Headers: Authorization: Bearer <admin_token>
 ## Workflow Pengaduan
 
 ### 1. **Pembuatan Tiket**
-- Order dikonfirmasi → Trigger membuat tiket garansi untuk setiap produk
+- Order berstatus 'completed' → Trigger membuat tiket garansi untuk setiap produk
 - Tiket berlaku 365 hari
 
 ### 2. **Pengajuan Pengaduan**
@@ -171,6 +183,7 @@ Headers: Authorization: Bearer <admin_token>
 - Admin dapat:
   - Terima → Buat chat room + status "accepted"
   - Tolak → Beri komentar + status "rejected"
+  - Pengguna bisa kirim ulang pengaduan yang ditolak dengan bukti baru melalui endpoint resubmit
   - Ubah prioritas → Mempengaruhi urutan tampilan
 
 ### 4. **Chat dan Penyelesaian**

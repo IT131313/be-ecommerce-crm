@@ -150,18 +150,21 @@ Headers:
 POST http://localhost:3000/api/consultations
 Headers:
   Authorization: Bearer your_jwt_token
-  Content-Type: application/json
-Body:
-{
-  "serviceId": 1,
-  "consultationTypeId": 1,
-  "designCategoryId": 1,
-  "designStyleId": 1,
-  "consultationDate": "2024-08-15",
-  "consultationTime": "10:00:00",
-  "address": "Jl. Sudirman No. 123, Jakarta",
-  "notes": "Butuh konsultasi untuk renovasi ruang tamu"
-}
+  Content-Type: multipart/form-data
+Body fields:
+- serviceId: 1
+- consultationTypeId: 1
+- designCategoryId: 1 (wajib jika serviceId bukan 1 atau 3)
+- designStyleId: 1 (wajib jika serviceId bukan 1 atau 3)
+- consultationDate: 2024-08-15
+- consultationTime: 10:00:00
+- address: Jl. Sudirman No. 123, Jakarta
+- notes: Butuh konsultasi untuk renovasi ruang tamu
+- referenceImageOne (file, optional): contoh inspirasi 1
+- referenceImageTwo (file, optional): contoh inspirasi 2
+- referenceImages (file[], optional): alternatif jika ingin mengirim dua file sekaligus (maksimal 2 berkas)
+
+Catatan: khusus serviceId 1 (Konstruksi Profesional) dan 3 (Instalasi Elektrik), field designCategoryId dan designStyleId boleh dikosongkan.
 
 21. Get User's Consultations
 GET http://localhost:3000/api/consultations
@@ -179,15 +182,37 @@ Detail lengkap konsultasi tertentu.
 PATCH http://localhost:3000/api/consultations/1/cancel
 Headers:
   Authorization: Bearer your_jwt_token
-Membatalkan konsultasi selama status belum selesai atau batal.
+Membatalkan konsultasi selama status belum selesai/final dan belum pernah dibatalkan. 
+Jika kontrak sudah mempunyai nominal proyek, sistem otomatis menghitung penalti 10% dari nilai kontrak
+dan menandai `paymentStatus` menjadi `awaiting_cancellation_fee`.
 
-24. Products You Can Rate
+Contoh respons:
+{
+  "message": "Consultation cancelled successfully",
+  "cancellationFeePercent": 10,
+  "cancellationFeeAmount": 2500000,
+  "paymentStatus": "awaiting_cancellation_fee"
+}
+
+24. Set Pre-Contract Meeting Link (Admin)
+PATCH http://localhost:3000/api/consultations/1/pre-contract-meeting
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+  Content-Type: application/json
+Body:
+{
+  "meetLink": "https://meet.example.com/room-123",
+  "meetDatetime": "2024-10-12 10:00"
+}
+Catatan: meetDatetime opsional, meetLink wajib. Link akan muncul di detail konsultasi dan daftar konsultasi user/admin.
+
+25. Products You Can Rate
 GET http://localhost:3000/api/products/user/rateable
 Headers:
   Authorization: Bearer your_jwt_token
 Daftar produk yang sudah dikirim dan bisa diberi rating.
 
-25. Submit Product Rating
+26. Submit Product Rating
 POST http://localhost:3000/api/products/1/rating
 Headers:
   Authorization: Bearer your_jwt_token
@@ -199,13 +224,13 @@ Body:
   "orderId": 42
 }
 
-26. View Cart
+27. View Cart
 GET http://localhost:3000/api/cart
 Headers:
   Authorization: Bearer your_jwt_token
 Melihat isi keranjang aktif.
 
-27. Add Item To Cart
+28. Add Item To Cart
 POST http://localhost:3000/api/cart/add
 Headers:
   Authorization: Bearer your_jwt_token
@@ -470,7 +495,7 @@ Body:
 {
   "email": "cs@contoh.com",
   "password": "superSecret123",
-  "name": "Customer Support"
+ "name": "Customer Support"
 }
 
 60. List Admins
@@ -492,6 +517,12 @@ Body:
 {
   "status": "shipped"
 }
+
+62b. Complete Order (User)
+PATCH http://localhost:3000/api/orders/10/complete
+Headers:
+  Authorization: Bearer your_jwt_token
+Catatan: hanya pemilik pesanan yang bisa memanggil endpoint ini dan status pesanan harus sudah `shipped`. Sistem otomatis menandai pesanan `completed`, menyalakan tiket garansi produk, dan memperbarui customer tag.
 
 66. List Pending Shipments (Admin)
 GET http://localhost:3000/api/admin/shipments/pending
@@ -565,6 +596,123 @@ Body:
   "name": "Bohemian",
   "imageUrl": "/images/bohemian.jpg"
 }
+
+### Consultation Contract & Timeline Flow
+
+- **Upload / Replace Contract (Admin)**
+  POST `http://localhost:3000/api/consultations/:consultationId/contracts`
+  Headers: Authorization (admin), `Content-Type: multipart/form-data`
+  Body fields:
+    - `contract`: PDF file (required)
+    - `projectCost`: nominal biaya proyek dalam angka (required, contoh `25000000`)
+  Respon mengembalikan metadata kontrak termasuk `projectCost`. Setelah kontrak tersimpan, status konsultasi berpindah ke `contract_uploaded`.
+
+- **Download Contract (User/Admin)**
+  GET `http://localhost:3000/api/consultations/:consultationId/contracts/:contractId/download`
+  Mengunduh PDF kontrak apabila pengguna adalah admin atau pemilik konsultasi.
+
+- **Get Contract & Timeline (User/Admin)**
+  GET `http://localhost:3000/api/consultations/:consultationId/contracts`
+  Mengembalikan detail kontrak (file path, `projectCost`, status pembayaran, informasi penalti) beserta daftar item timeline dan jumlah komentar per item.
+
+- **Create/Replace Timeline Items (Admin)**
+  POST `http://localhost:3000/api/consultations/:consultationId/contracts/:contractId/timeline`
+  Body JSON menampung array `items` di mana setiap elemen WAJIB memiliki `activityType`:
+    - `progress`: butuh `dueDate` (deadline progress).
+    - `meeting`: butuh `meetingDatetime` (tanggal + jam meeting) dan opsional `meetingLink`.
+    - `finalization`: butuh `dueDate`. Customer harus bayar lunas sebelum finalisasi boleh ditandai selesai.
+
+  Contoh payload:
+  ```json
+  {
+    "items": [
+      { "title": "Kick-off", "description": "Review kontrak", "activityType": "progress", "dueDate": "2024-10-06" },
+      { "title": "Meeting Desain Awal", "activityType": "meeting", "meetingDatetime": "2024-10-08 10:00", "meetingLink": "https://meet.example.com/abc" },
+      { "title": "Render Final", "activityType": "finalization", "dueDate": "2024-10-20" }
+    ]
+  }
+  ```
+  Gunakan `useDefaultTemplate: true` untuk mengisi otomatis. Setelah timeline aktif, status konsultasi berubah ke `timeline_in_progress`.
+
+- **Update Timeline Item Status (Admin)**
+  PATCH `http://localhost:3000/api/consultations/:consultationId/contracts/:contractId/timeline/:timelineItemId`
+
+  - Untuk meeting, cukup kirim body JSON (misalnya mengubah `status`, `meetingDatetime`, `meetingLink`).
+  - Untuk progress/finalization, ketika mengganti `status` menjadi `completed` WAJIB memakai `multipart/form-data` dan menyertakan berkas `resultFile` (file hasil progres/final).
+  - Finalisasi hanya boleh ditandai `completed` setelah `paymentStatus` konsultasi `paid`.
+
+  Contoh (progress selesai):
+  ```
+  Form-Data:
+    status = completed
+    resultFile = (unggah PDF/ZIP/Gambar hasil)
+  ```
+
+  Ketika seluruh aktivitas selesai, sistem otomatis memindahkan konsultasi ke `awaiting_payment` dan `paymentStatus = awaiting_final_payment`. Setelah admin menandai `paymentStatus = paid`, aktivitas finalisasi dapat diunggah sehingga `final_delivery_status` berubah menjadi `delivered`.
+
+- **Timeline Comments (Admin & Customer)**
+  - GET `/:consultationId/contracts/:contractId/timeline/:timelineItemId/comments`
+  - POST `/:consultationId/contracts/:contractId/timeline/:timelineItemId/comments`
+  
+  Kedua pihak dapat berdiskusi per item timeline. Payload POST:
+  ```json
+  {
+    "message": "Mohon konfirmasi revisi konsep ke-2."
+  }
+  ```
+
+- **Update Payment & Delivery Status (Admin)**
+  PATCH `http://localhost:3000/api/consultations/:consultationId/payment-status`
+  Body contoh:
+  ```json
+  {
+    "paymentStatus": "paid",
+    "finalDeliveryNote": "Hasil akhir sudah dikirim via email."
+  }
+  ```
+  Nilai `paymentStatus` yang didukung: `not_ready`, `awaiting_cancellation_fee`, `cancellation_fee_recorded`, `awaiting_final_payment`, `paid`, `overdue`.
+  `finalDeliveryStatus` otomatis menjadi `delivered` saat pembayaran ditandai `paid`, atau tetap bisa diatur manual (`withheld` jika pembayaran belum selesai).
+
+## Integrasi Pembayaran Midtrans Snap
+
+Sebelum memakai endpoint pembayaran, pastikan variabel `.env` berikut terisi:
+
+```
+MIDTRANS_SERVER_KEY=your_midtrans_server_key
+MIDTRANS_CLIENT_KEY=your_midtrans_client_key
+MIDTRANS_IS_PRODUCTION=false
+```
+
+Struktur transaksi disimpan di tabel baru `payment_transactions`. Untuk database yang sudah berjalan, jalankan migrasi:
+
+```
+mysql -u root < scripts/migrations/003_midtrans_snap.sql
+```
+
+Endpoint baru:
+
+- **Get Midtrans Client Key**  
+  GET `http://localhost:3000/api/payments/config` (header Authorization wajib). Mengembalikan `clientKey` & flag `isProduction` untuk inisialisasi Snap di frontend.
+
+- **Create Snap Token for Order Checkout**  
+  POST `http://localhost:3000/api/payments/orders/:orderId/snap` (token user/admin). Hanya pemilik order atau admin yang dapat memanggilnya. API mengembalikan `orderCode`, `snapToken`, dan `redirectUrl`. Jika sudah ada token pending, endpoint otomatis mereuse token lama agar tidak tercipta transaksi ganda.
+
+- **Create Snap Token for Consultation**  
+  POST `http://localhost:3000/api/payments/consultations/:consultationId/snap` (token user/admin). Body opsional:  
+  ```json
+  { "paymentType": "final" }
+  ```  
+  Gunakan `paymentType: "cancellation"` ketika konsultasi berada pada status `awaiting_cancellation_fee` agar Snap membuat tagihan penalti 10%.
+
+- **Midtrans Webhook**  
+  POST `http://localhost:3000/api/payments/webhook` menerima payload asli Midtrans tanpa autentikasi tambahan. Endpoint memverifikasi `signature_key` dan mengubah status:
+  - `orders.status` ➜ `confirmed` ketika transaksi settlement
+  - `consultations.payment_status` ➜ `paid` atau `cancellation_fee_recorded` sesuai tujuan transaksi
+
+Catatan tambahan:
+- `order_code` Midtrans selalu unik dan maksimal 50 karakter.
+- Snap item detail mencakup ongkir sehingga `gross_amount` = total order.
+- Log request/response Snap tersimpan di kolom `payment_response` untuk audit.
 
 68. View Complaints Board
 GET http://localhost:3000/api/admin/complaints
@@ -641,4 +789,26 @@ Headers:
   Authorization: Bearer your_admin_jwt_token
 Menandai pesan pengguna sebagai sudah dibaca (sama endpoint dengan #39).
 
+80. Customer Segments (Admin)
+GET http://localhost:3000/api/admin/customers/segments
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+Menampilkan daftar pelanggan + jumlah pembelian selesai (`completed`/`shipped`), jumlah klaim garansi, dan tag saat ini.
 
+81. Set / Reset Customer Tag (Admin)
+PATCH http://localhost:3000/api/admin/users/:id/tag
+Headers:
+  Authorization: Bearer your_admin_jwt_token
+Body contoh (manual):
+{
+  "tag": "loyal"              // opsi: prospect_new, loyal, needs_attention
+}
+Body contoh (reset ke otomatis):
+{
+  "mode": "auto"
+}
+
+Aturan otomatis:
+- Default pengguna baru: `prospect_new`.
+- >=3 pembelian berstatus `completed`/`shipped`: `loyal` (otomatis, atau bisa ditetapkan admin kapan saja).
+- >=2 klaim garansi/complaint: `needs_attention` (rekomendasi label UI: “Perlu Perhatian” agar lebih netral daripada “Bermasalah”).

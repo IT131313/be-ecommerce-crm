@@ -4,7 +4,6 @@ const http = require('http');
 const { Server } = require('socket.io');
 require('dotenv').config();
 const path = require('path');
-const db = require('./config/database');
 const authRoutes = require('./routes/auth');
 const adminAuthRoutes = require('./routes/admin-auth');
 const adminRoutes = require('./routes/admin');
@@ -17,10 +16,58 @@ const ordersRoutes = require('./routes/orders');
 const consultationsRoutes = require('./routes/consultations');
 const complaintsRoutes = require('./routes/complaints');
 const adminComplaintsRoutes = require('./routes/admin-complaints');
+const paymentsRoutes = require('./routes/payments');
 const { handleChatConnection } = require('./socket/chatHandler');
+const { initializeDatabase } = require('./config/init-db');
 
 const app = express();
 const server = http.createServer(app);
+
+const WIB_TIME_ZONE = 'Asia/Jakarta';
+const wibDateTimeFormatter = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: WIB_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false
+});
+
+const isPlainObject = (value) => {
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+};
+
+const convertDatesToWIBStrings = (payload) => {
+  if (payload instanceof Date) {
+    const parts = wibDateTimeFormatter.formatToParts(payload).reduce((acc, part) => {
+      if (part.type !== 'literal') {
+        acc[part.type] = part.value;
+      }
+      return acc;
+    }, {});
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+  }
+
+  if (Array.isArray(payload)) {
+    return payload.map(convertDatesToWIBStrings);
+  }
+
+  if (isPlainObject(payload)) {
+    const cloned = {};
+    for (const [key, value] of Object.entries(payload)) {
+      cloned[key] = convertDatesToWIBStrings(value);
+    }
+    return cloned;
+  }
+
+  return payload;
+};
 
 // Socket.IO setup with CORS
 const io = new Server(server, {
@@ -34,105 +81,20 @@ const io = new Server(server, {
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Ensure every JSON response serializes Date objects as WIB (GMT+7) strings
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = (body) => originalJson(convertDatesToWIBStrings(body));
+  next();
+});
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const PORT = process.env.PORT || 3000;
 
-// Helper function to create users table if not exists
-// Database is initialized in database.js
-async function initializeDatabase() {
-  try {
-    // Verify database connection
-    await db.run('SELECT 1');
-    console.log('Database initialized successfully');
-
-    // Ensure orders.shipping_method column exists
-    try {
-      const dbName = process.env.DB_NAME || 'auth_db';
-      const columnCheck = await db.get(
-        `SELECT COUNT(*) as cnt
-         FROM INFORMATION_SCHEMA.COLUMNS 
-         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'orders' AND COLUMN_NAME = 'shipping_method'`,
-        [dbName]
-      );
-      if (!columnCheck || columnCheck.cnt === 0) {
-        await db.run("ALTER TABLE orders ADD COLUMN shipping_method VARCHAR(10) NULL");
-        console.log('Added orders.shipping_method column');
-      }
-    } catch (e) {
-      console.warn('Could not ensure orders.shipping_method column:', e.message || e);
-    }
-
-    // Ensure orders.tracking_number column exists
-    try {
-      const dbName = process.env.DB_NAME || 'auth_db';
-      const columnCheckTrack = await db.get(
-        `SELECT COUNT(*) as cnt
-         FROM INFORMATION_SCHEMA.COLUMNS 
-         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'orders' AND COLUMN_NAME = 'tracking_number'`,
-        [dbName]
-      );
-      if (!columnCheckTrack || columnCheckTrack.cnt === 0) {
-        await db.run("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(100) NULL");
-        console.log('Added orders.tracking_number column');
-      }
-    } catch (e) {
-      console.warn('Could not ensure orders.tracking_number column:', e.message || e);
-    }
-
-    // Ensure orders.shipped_at column exists
-    try {
-      const dbName = process.env.DB_NAME || 'auth_db';
-      const columnCheckShippedAt = await db.get(
-        `SELECT COUNT(*) as cnt
-         FROM INFORMATION_SCHEMA.COLUMNS 
-         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'orders' AND COLUMN_NAME = 'shipped_at'`,
-        [dbName]
-      );
-      if (!columnCheckShippedAt || columnCheckShippedAt.cnt === 0) {
-        await db.run("ALTER TABLE orders ADD COLUMN shipped_at DATETIME NULL");
-        console.log('Added orders.shipped_at column');
-      }
-    } catch (e) {
-      console.warn('Could not ensure orders.shipped_at column:', e.message || e);
-    }
-  } catch (error) {
-    console.error('Failed to initialize database:', error);
-    throw error;
-  }
-}
-
 // Routes  
 app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Selamat Datang di Server E-commerce + CRM!',
-    status: 'Server berjalan dengan baik',
-    port: process.env.PORT || 8000,
-    endpoints: [
-      '/api/auth/login',
-      '/api/auth/register', 
-      '/api/auth/google',
-      '/api/auth/forgot-password',
-      '/api/auth/reset-password',
-      '/api/admin/auth/login',
-      '/api/admin/auth/forgot-password',
-      '/api/admin/auth/reset-password',
-      '/api/users/profile',
-      '/api/users/change-password',
-      '/api/chat/room',
-      '/api/chat/rooms',
-      '/api/complaints/tickets',
-      '/api/complaints/create',
-      '/api/admin/complaints'
-    ],
-    features: [
-      'Real-time Chat with Socket.IO',
-      'User-Admin Communication',
-      'Message History & Notifications',
-      'Warranty Ticket System',
-      'Customer Complaint Management'
-    ]
-  });
+  res.send('Selamat Datang di Server E-commerce + CRM!');
 });
 
 app.use('/api/auth', authRoutes);
@@ -147,6 +109,7 @@ app.use('/api/orders', ordersRoutes);
 app.use('/api/consultations', consultationsRoutes);
 app.use('/api/complaints', complaintsRoutes);
 app.use('/api/admin', adminComplaintsRoutes);
+app.use('/api/payments', paymentsRoutes);
 
 // Initialize Socket.IO chat handlers
 handleChatConnection(io);
