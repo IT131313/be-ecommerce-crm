@@ -9,7 +9,7 @@ Sistem pengaduan pelanggan yang terintegrasi dengan fitur chat untuk menangani k
 ### 1. **Tiket Garansi Otomatis**
 - Tiket garansi dibuat otomatis ketika order berstatus 'confirmed'
 - Setiap produk dalam order mendapat tiket garansi terpisah
-- Masa garansi: 365 hari dari tanggal konfirmasi order
+- Masa garansi: 30 hari dari tanggal konfirmasi order
 - Status tiket: active, used, expired
 
 ### 2. **Sistem Pengaduan**
@@ -170,7 +170,7 @@ Headers: Authorization: Bearer <admin_token>
 
 ### 1. **Pembuatan Tiket**
 - Order berstatus 'completed' → Trigger membuat tiket garansi untuk setiap produk
-- Tiket berlaku 365 hari
+- Tiket berlaku 30 hari
 
 ### 2. **Pengajuan Pengaduan**
 - Pelanggan pilih tiket garansi yang valid

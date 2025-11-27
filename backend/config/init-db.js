@@ -71,6 +71,43 @@ async function initializeDatabase() {
     } catch (e) {
       console.warn('Could not ensure orders.shipping_cost column:', e.message || e);
     }
+
+    // Ensure notifications tables exist
+    try {
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS notifications (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          type VARCHAR(50) NOT NULL,
+          title VARCHAR(255) NOT NULL,
+          body TEXT,
+          data JSON,
+          audience ENUM('all', 'user') DEFAULT 'user',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_notifications_type (type),
+          INDEX idx_notifications_created_at (created_at)
+        )
+      `);
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS notification_users (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          notification_id INT NOT NULL,
+          user_id INT NOT NULL,
+          status ENUM('unread', 'read') DEFAULT 'unread',
+          read_at DATETIME NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uniq_notification_user (notification_id, user_id),
+          FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          INDEX idx_notification_users_user_status (user_id, status),
+          INDEX idx_notification_users_notification (notification_id)
+        )
+      `);
+
+      console.log('Notifications tables verified');
+    } catch (e) {
+      console.warn('Could not ensure notification tables:', e.message || e);
+    }
   } catch (error) {
     console.error('Failed to initialize database:', error);
     throw error;

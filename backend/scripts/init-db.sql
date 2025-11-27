@@ -57,6 +57,28 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Create product ratings table
+CREATE TABLE IF NOT EXISTS product_ratings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  product_id INT NOT NULL,
+  order_id INT NOT NULL,
+  rating TINYINT UNSIGNED NOT NULL,
+  review TEXT,
+  admin_reply TEXT,
+  admin_reply_by INT,
+  admin_reply_at DATETIME,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_product_rating (user_id, product_id, order_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (admin_reply_by) REFERENCES admins(id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_product_ratings_product_id ON product_ratings(product_id);
+CREATE INDEX idx_product_ratings_order_id ON product_ratings(order_id);
+
 -- Create cart_items table
 CREATE TABLE IF NOT EXISTS cart_items (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -263,3 +285,31 @@ CREATE TABLE IF NOT EXISTS revoked_tokens (
 
 -- Optional cleanup index
 CREATE INDEX idx_revoked_tokens_expires_at ON revoked_tokens(expires_at);
+
+-- Notifications (metadata)
+CREATE TABLE IF NOT EXISTS notifications (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  type VARCHAR(50) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  body TEXT,
+  data JSON,
+  audience ENUM('all', 'user') DEFAULT 'user',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_notifications_type (type),
+  INDEX idx_notifications_created_at (created_at)
+);
+
+-- Notification read state per user
+CREATE TABLE IF NOT EXISTS notification_users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  notification_id INT NOT NULL,
+  user_id INT NOT NULL,
+  status ENUM('unread', 'read') DEFAULT 'unread',
+  read_at DATETIME NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_notification_user (notification_id, user_id),
+  FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_notification_users_user_status (user_id, status),
+  INDEX idx_notification_users_notification (notification_id)
+);

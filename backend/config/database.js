@@ -35,7 +35,8 @@ const dbAsync = {
     } catch (error) {
       throw error;
     }
-  }
+  },
+  getConnection: () => pool.getConnection()
 };
 
 pool.getConnection()
@@ -47,4 +48,7 @@ pool.getConnection()
     console.error('Error connecting to database:', err);
   });
 
-module.exports = dbAsync;
+module.exports = {
+  ...dbAsync,
+  pool
+};

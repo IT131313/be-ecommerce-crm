@@ -19,6 +19,7 @@ const adminComplaintsRoutes = require('./routes/admin-complaints');
 const paymentsRoutes = require('./routes/payments');
 const { handleChatConnection } = require('./socket/chatHandler');
 const { initializeDatabase } = require('./config/init-db');
+const notificationsRoutes = require('./routes/notifications');
 
 const app = express();
 const server = http.createServer(app);
@@ -110,6 +111,7 @@ app.use('/api/consultations', consultationsRoutes);
 app.use('/api/complaints', complaintsRoutes);
 app.use('/api/admin', adminComplaintsRoutes);
 app.use('/api/payments', paymentsRoutes);
+app.use('/api/notifications', notificationsRoutes);
 
 // Initialize Socket.IO chat handlers
 handleChatConnection(io);

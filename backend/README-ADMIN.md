@@ -30,6 +30,7 @@
   - `PUT /api/admin/products/:id` - Update produk
   - `DELETE /api/admin/products/:id` - Hapus produk
   - `PATCH /api/products/:id/stock` - Update stock
+  - `POST /api/products/ratings/:ratingId/reply` - Balas/ubah balasan untuk rating produk pengguna
 - **Manage Orders**:
   - `GET /api/admin/orders` - Lihat semua order
   - `GET /api/admin/orders/:id` - Detail order

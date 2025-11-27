@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { authMiddleware, adminAuthMiddleware, userOnlyMiddleware } = require('../middleware/auth');
+const { broadcastToAllUsers } = require('../services/notificationService');
 
 // Get all products
 router.get('/', async (req, res) => {
@@ -40,11 +41,30 @@ router.post('/', adminAuthMiddleware, async (req, res) => {
   }
 
   try {
-    await db.run(
+    const result = await db.run(
       'INSERT INTO products (name, description, category, price, image_url) VALUES (?, ?, ?, ?, ?)',
       [name, description, category, price, imageUrl]
     );
-    res.status(201).json({ message: 'Product added successfully' });
+
+    const productId = result.lastID;
+
+    // Broadcast notification about the new product to all users
+    broadcastToAllUsers({
+      type: 'product_created',
+      title: 'Produk baru tersedia',
+      body: `${name} baru saja ditambahkan`,
+      data: {
+        product_id: productId,
+        name,
+        category,
+        price,
+        image_url: imageUrl
+      }
+    }).catch((err) => {
+      console.warn('Failed to send product notification:', err?.message || err);
+    });
+
+    res.status(201).json({ message: 'Product added successfully', productId });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
@@ -189,12 +209,17 @@ router.get('/:id/ratings', async (req, res) => {
   try {
     const ratings = await db.all(`
       SELECT 
+        pr.id,
         pr.rating,
         pr.review,
         pr.created_at,
-        u.username
+        pr.admin_reply,
+        pr.admin_reply_at,
+        u.username,
+        a.name as admin_name
       FROM product_ratings pr
       JOIN users u ON pr.user_id = u.id
+      LEFT JOIN admins a ON pr.admin_reply_by = a.id
       WHERE pr.product_id = ?
       ORDER BY pr.created_at DESC
     `, [req.params.id]);
@@ -226,6 +251,63 @@ router.get('/:id/ratings', async (req, res) => {
           1: summary.one_star || 0
         }
       }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Admin reply to a product rating
+router.post('/ratings/:ratingId/reply', adminAuthMiddleware, async (req, res) => {
+  const { reply } = req.body || {};
+  const sanitizedReply = typeof reply === 'string' ? reply.trim() : '';
+
+  if (!sanitizedReply) {
+    return res.status(400).json({ error: 'Reply is required' });
+  }
+
+  if (sanitizedReply.length > 2000) {
+    return res.status(400).json({ error: 'Reply is too long (max 2000 characters)' });
+  }
+
+  try {
+    const rating = await db.get(
+      'SELECT id, product_id, admin_reply FROM product_ratings WHERE id = ?',
+      [req.params.ratingId]
+    );
+
+    if (!rating) {
+      return res.status(404).json({ error: 'Rating not found' });
+    }
+
+    await db.run(
+      `UPDATE product_ratings 
+       SET admin_reply = ?, admin_reply_by = ?, admin_reply_at = NOW() 
+       WHERE id = ?`,
+      [sanitizedReply, req.user.id, req.params.ratingId]
+    );
+
+    const updatedRating = await db.get(`
+      SELECT 
+        pr.id,
+        pr.product_id,
+        pr.rating,
+        pr.review,
+        pr.created_at,
+        pr.admin_reply,
+        pr.admin_reply_at,
+        u.username,
+        a.name as admin_name
+      FROM product_ratings pr
+      JOIN users u ON pr.user_id = u.id
+      LEFT JOIN admins a ON pr.admin_reply_by = a.id
+      WHERE pr.id = ?
+    `, [req.params.ratingId]);
+
+    res.json({
+      message: rating.admin_reply ? 'Reply updated' : 'Reply added',
+      rating: updatedRating
     });
   } catch (error) {
     console.error(error);

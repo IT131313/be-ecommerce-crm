@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { adminAuthMiddleware } = require('../middleware/auth');
 const { applyAutoTag, setManualTag, resetToAuto, TAGS, VALID_TAGS } = require('../services/customerTags');
+const { broadcastToAllUsers } = require('../services/notificationService');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -752,6 +753,23 @@ router.post('/products', adminAuthMiddleware, upload.single('image'), async (req
     );
 
     const product = await db.get('SELECT * FROM products WHERE id = ?', [result.lastID]);
+
+    // Broadcast notification about the new product to all users
+    const productName = product.name || product.NAME || name;
+    broadcastToAllUsers({
+      type: 'product_created',
+      title: 'Produk baru tersedia',
+      body: `${productName} baru saja ditambahkan`,
+      data: {
+        product_id: product.id,
+        name: productName,
+        category: product.category,
+        price: product.price,
+        image_url: product.image_url
+      }
+    }).catch((err) => {
+      console.warn('Failed to send product notification:', err?.message || err);
+    });
 
     return res.status(201).json({
       message: 'Product created successfully',

@@ -224,6 +224,10 @@ Body:
   "orderId": 42
 }
 
+Catatan:
+- Respons daftar rating (`GET /api/products/:id/ratings`) kini menyertakan `id`, `admin_reply`, `admin_reply_at`, dan `admin_name`.
+- Admin dapat membalas atau mengubah balasan rating tertentu melalui `POST /api/products/ratings/:ratingId/reply` dengan body `{ "reply": "Terima kasih sudah memberi ulasan!" }` dan header token admin.
+
 27. View Cart
 GET http://localhost:3000/api/cart
 Headers:

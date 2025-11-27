@@ -15,10 +15,12 @@ const {
 const PAYMENT_PURPOSES = {
   ORDER: 'order_payment',
   CONSULTATION_FINAL: 'consultation_final',
-  CONSULTATION_CANCELLATION: 'consultation_cancellation'
+  CONSULTATION_CANCELLATION: 'consultation_cancellation',
+  CONSULTATION_DP: 'consultation_dp'
 };
 
 const SNAP_REUSABLE_STATUSES = new Set(['token', 'pending', 'challenge']);
+const SNAP_REUSE_MAX_AGE_MINUTES = 15;
 const MAX_ORDER_CODE_LENGTH = 50;
 
 function buildOrderCode(prefix, referenceId) {
@@ -58,9 +60,10 @@ async function findReusableSnap(referenceType, referenceId, purpose) {
      FROM payment_transactions
      WHERE reference_type = ? AND reference_id = ? AND purpose = ?
        AND transaction_status IN (${reusableStatuses.map(() => '?').join(', ')})
+       AND created_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE)
      ORDER BY created_at DESC
      LIMIT 1`,
-    [referenceType, referenceId, purpose, ...reusableStatuses]
+    [referenceType, referenceId, purpose, ...reusableStatuses, SNAP_REUSE_MAX_AGE_MINUTES]
   );
 }
 
@@ -103,6 +106,22 @@ async function persistPaymentToken({
   );
 }
 
+async function getTotalDpPaid(consultationId) {
+  if (!consultationId) {
+    return 0;
+  }
+  const row = await db.get(
+    `SELECT COALESCE(SUM(gross_amount), 0) AS total_dp
+     FROM payment_transactions
+     WHERE reference_type = 'consultation'
+       AND reference_id = ?
+       AND purpose = ?
+       AND transaction_status = 'settlement'`,
+    [consultationId, PAYMENT_PURPOSES.CONSULTATION_DP]
+  );
+  return Number(row?.total_dp) || 0;
+}
+
 function ensureClientKey() {
   const clientKey = getMidtransClientKey();
   if (!clientKey) {
@@ -128,6 +147,7 @@ router.get('/config', authMiddleware, (req, res) => {
 
 router.post('/orders/:orderId/snap', authMiddleware, async (req, res) => {
   const orderId = Number(req.params.orderId);
+  const forceNew = req.query.forceNew === 'true' || req.body?.forceNew === true;
   if (!Number.isInteger(orderId) || orderId <= 0) {
     return res.status(400).json({ error: 'Invalid order ID' });
   }
@@ -169,7 +189,7 @@ router.post('/orders/:orderId/snap', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Order amount is invalid' });
     }
 
-    const reusable = await findReusableSnap('order', orderId, PAYMENT_PURPOSES.ORDER);
+    const reusable = forceNew ? null : await findReusableSnap('order', orderId, PAYMENT_PURPOSES.ORDER);
     if (reusable) {
       return res.json({
         reused: true,
@@ -270,13 +290,14 @@ router.post('/consultations/:consultationId/snap', authMiddleware, async (req, r
   const requestedType = typeof req.body?.paymentType === 'string'
     ? req.body.paymentType.toLowerCase()
     : 'final';
+  const forceNew = req.query.forceNew === 'true' || req.body?.forceNew === true;
 
   if (!Number.isInteger(consultationId) || consultationId <= 0) {
     return res.status(400).json({ error: 'Invalid consultation ID' });
   }
 
-  if (!['final', 'cancellation'].includes(requestedType)) {
-    return res.status(400).json({ error: 'paymentType must be either "final" or "cancellation"' });
+  if (!['final', 'cancellation', 'dp'].includes(requestedType)) {
+    return res.status(400).json({ error: 'paymentType must be either "dp", "final" or "cancellation"' });
   }
 
   try {
@@ -336,6 +357,24 @@ router.post('/consultations/:consultationId/snap', authMiddleware, async (req, r
       grossAmount = toIntegerAmount(feeAmount);
       purpose = PAYMENT_PURPOSES.CONSULTATION_CANCELLATION;
       itemLabel = `Penalti Konsultasi #${consultation.id}`;
+    } else if (requestedType === 'dp') {
+      if (!contract || Number(contract.project_cost) <= 0) {
+        return res.status(400).json({ error: 'Consultation contract cost is not set' });
+      }
+      if (consultation.payment_status === 'paid') {
+        return res.status(400).json({ error: 'Consultation is already fully paid' });
+      }
+      if (consultation.payment_status === 'dp_paid') {
+        return res.status(400).json({ error: 'DP has already been paid' });
+      }
+      const dpPercent = Number(consultation.cancellation_fee_percent) || 10; // gunakan default 10% sebagai DP
+      const dpAmount = Number(((Number(contract.project_cost) || 0) * dpPercent / 100).toFixed(2));
+      if (dpAmount <= 0) {
+        return res.status(400).json({ error: 'DP amount is not available' });
+      }
+      grossAmount = toIntegerAmount(dpAmount);
+      purpose = PAYMENT_PURPOSES.CONSULTATION_DP;
+      itemLabel = `DP Konsultasi #${consultation.id}`;
     } else {
       if (!contract || Number(contract.project_cost) <= 0) {
         return res.status(400).json({ error: 'Consultation contract cost is not set' });
@@ -343,16 +382,21 @@ router.post('/consultations/:consultationId/snap', authMiddleware, async (req, r
       if (consultation.payment_status === 'paid') {
         return res.status(400).json({ error: 'Consultation is already paid' });
       }
-      const allowedStatuses = new Set(['awaiting_final_payment', 'awaiting_payment', 'overdue']);
+      const allowedStatuses = new Set(['awaiting_final_payment', 'awaiting_payment', 'overdue', 'dp_paid']);
       if (!allowedStatuses.has(consultation.payment_status)) {
         return res.status(400).json({ error: 'Consultation is not ready for final payment' });
       }
-      grossAmount = toIntegerAmount(contract.project_cost);
+      const dpPaidTotal = await getTotalDpPaid(consultation.id);
+      const remaining = Math.max(0, Number(contract.project_cost) - dpPaidTotal);
+      if (remaining <= 0) {
+        return res.status(400).json({ error: 'No remaining balance to pay' });
+      }
+      grossAmount = toIntegerAmount(remaining);
       purpose = PAYMENT_PURPOSES.CONSULTATION_FINAL;
-      itemLabel = `Pembayaran Konsultasi #${consultation.id}`;
+      itemLabel = `Pelunasan Konsultasi #${consultation.id}`;
     }
 
-    const reusable = await findReusableSnap('consultation', consultationId, purpose);
+    const reusable = forceNew ? null : await findReusableSnap('consultation', consultationId, purpose);
     if (reusable) {
       return res.json({
         reused: true,
@@ -377,7 +421,9 @@ router.post('/consultations/:consultationId/snap', authMiddleware, async (req, r
           name: truncateText(itemLabel, 50),
           price: grossAmount,
           quantity: 1,
-          category: requestedType === 'cancellation' ? 'Cancellation Fee' : 'Consultation'
+          category: requestedType === 'cancellation'
+            ? 'Cancellation Fee'
+            : (requestedType === 'dp' ? 'Down Payment' : 'Consultation')
         }
       ],
       customer_details: {
@@ -461,6 +507,13 @@ async function applyConsultationStatusFromPayment(consultationId, purpose, trans
            WHEN status IN ('cancelled', 'finalized') THEN status
            ELSE 'finalized'
          END
+       WHERE id = ?`,
+      [consultationId]
+    );
+  } else if (purpose === PAYMENT_PURPOSES.CONSULTATION_DP) {
+    await db.run(
+      `UPDATE consultations
+       SET payment_status = 'dp_paid'
        WHERE id = ?`,
       [consultationId]
     );

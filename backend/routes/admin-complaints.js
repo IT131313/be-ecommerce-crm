@@ -87,67 +87,71 @@ router.get('/complaints', adminAuthMiddleware, async (req, res) => {
 router.patch('/complaints/:complaintId/accept', adminAuthMiddleware, async (req, res) => {
   const { complaintId } = req.params;
 
+  let connection;
   try {
-    // Start transaction
-    await db.run('BEGIN TRANSACTION');
+    connection = await db.getConnection();
+    await connection.beginTransaction();
 
-    try {
-      // Check if complaint exists and is pending
-      const complaint = await db.get(`
-        SELECT c.*, u.id as user_id 
-        FROM complaints c
-        JOIN warranty_tickets wt ON c.ticket_id = wt.id
-        JOIN users u ON c.user_id = u.id
-        WHERE c.id = ? AND c.status = 'pending'
-      `, [complaintId]);
+    // Check if complaint exists and is pending
+    const [complaints] = await connection.execute(`
+      SELECT c.*, u.id as user_id 
+      FROM complaints c
+      JOIN warranty_tickets wt ON c.ticket_id = wt.id
+      JOIN users u ON c.user_id = u.id
+      WHERE c.id = ? AND c.status = 'pending'
+    `, [complaintId]);
 
-      if (!complaint) {
-        await db.run('ROLLBACK');
-        return res.status(404).json({ 
-          error: 'Complaint not found or already processed' 
-        });
-      }
-
-      // Create chat room for this complaint
-      const chatRoomResult = await db.run(`
-        INSERT INTO chat_rooms (user_id, admin_id, status) 
-        VALUES (?, ?, 'active')
-      `, [complaint.user_id, req.user.id]);
-
-      const chatRoomId = chatRoomResult.lastID;
-
-      // Link complaint to chat room
-      await db.run(`
-        INSERT INTO complaint_chat_rooms (complaint_id, chat_room_id)
-        VALUES (?, ?)
-      `, [complaintId, chatRoomId]);
-
-      // Update complaint status and assign admin
-      await db.run(`
-        UPDATE complaints 
-        SET status = 'accepted', admin_id = ?, chat_room_id = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `, [req.user.id, chatRoomId, complaintId]);
-
-      // Add initial system message to chat room
-      await db.run(`
-        INSERT INTO chat_messages (room_id, sender_id, sender_type, message, message_type)
-        VALUES (?, ?, 'admin', 'Pengaduan Anda telah diterima. Mari kita diskusikan masalah ini lebih lanjut.', 'system')
-      `, [chatRoomId, req.user.id]);
-
-      await db.run('COMMIT');
-
-      res.json({
-        message: 'Complaint accepted and chat room created',
-        chat_room_id: chatRoomId
+    const complaint = complaints[0];
+    if (!complaint) {
+      await connection.rollback();
+      return res.status(404).json({ 
+        error: 'Complaint not found or already processed' 
       });
-    } catch (error) {
-      await db.run('ROLLBACK');
-      throw error;
     }
+
+    // Create chat room for this complaint
+    const [chatRoomResult] = await connection.execute(`
+      INSERT INTO chat_rooms (user_id, admin_id, status) 
+      VALUES (?, ?, 'active')
+    `, [complaint.user_id, req.user.id]);
+
+    const chatRoomId = chatRoomResult.insertId;
+
+    // Link complaint to chat room
+    await connection.execute(`
+      INSERT INTO complaint_chat_rooms (complaint_id, chat_room_id)
+      VALUES (?, ?)
+    `, [complaintId, chatRoomId]);
+
+    // Update complaint status and assign admin
+    await connection.execute(`
+      UPDATE complaints 
+      SET status = 'accepted', admin_id = ?, chat_room_id = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [req.user.id, chatRoomId, complaintId]);
+
+    // Add initial system message to chat room
+    await connection.execute(`
+      INSERT INTO chat_messages (room_id, sender_id, sender_type, message, message_type)
+      VALUES (?, ?, 'admin', 'Pengaduan Anda telah diterima. Mari kita diskusikan masalah ini lebih lanjut.', 'system')
+    `, [chatRoomId, req.user.id]);
+
+    await connection.commit();
+
+    res.json({
+      message: 'Complaint accepted and chat room created',
+      chat_room_id: chatRoomId
+    });
   } catch (error) {
+    if (connection) {
+      await connection.rollback();
+    }
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 });
 
@@ -226,61 +230,65 @@ router.patch('/complaints/:complaintId/priority', adminAuthMiddleware, async (re
 router.patch('/complaints/:complaintId/resolve', adminAuthMiddleware, async (req, res) => {
   const { complaintId } = req.params;
 
+  let connection;
   try {
-    // Start transaction
-    await db.run('BEGIN TRANSACTION');
+    connection = await db.getConnection();
+    await connection.beginTransaction();
 
-    try {
-      // Check if complaint exists and is accepted
-      const complaint = await db.get(`
-        SELECT c.*, cr.id as chat_room_id
-        FROM complaints c
-        LEFT JOIN complaint_chat_rooms ccr ON c.id = ccr.complaint_id
-        LEFT JOIN chat_rooms cr ON ccr.chat_room_id = cr.id
-        WHERE c.id = ? AND c.status = 'accepted'
-      `, [complaintId]);
+    // Check if complaint exists and is accepted
+    const [complaints] = await connection.execute(`
+      SELECT c.*, cr.id as chat_room_id
+      FROM complaints c
+      LEFT JOIN complaint_chat_rooms ccr ON c.id = ccr.complaint_id
+      LEFT JOIN chat_rooms cr ON ccr.chat_room_id = cr.id
+      WHERE c.id = ? AND c.status = 'accepted'
+    `, [complaintId]);
 
-      if (!complaint) {
-        await db.run('ROLLBACK');
-        return res.status(404).json({ 
-          error: 'Complaint not found or not in accepted status' 
-        });
-      }
-
-      // Update complaint status
-      await db.run(`
-        UPDATE complaints 
-        SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `, [complaintId]);
-
-      // Close associated chat room if exists
-      if (complaint.chat_room_id) {
-        await db.run(`
-          UPDATE chat_rooms 
-          SET status = 'closed', updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `, [complaint.chat_room_id]);
-
-        // Add system message about resolution
-        await db.run(`
-          INSERT INTO chat_messages (room_id, sender_id, sender_type, message, message_type)
-          VALUES (?, ?, 'admin', 'Pengaduan ini telah diselesaikan. Chat room akan ditutup.', 'system')
-        `, [complaint.chat_room_id, req.user.id]);
-      }
-
-      await db.run('COMMIT');
-
-      res.json({
-        message: 'Complaint resolved successfully'
+    const complaint = complaints[0];
+    if (!complaint) {
+      await connection.rollback();
+      return res.status(404).json({ 
+        error: 'Complaint not found or not in accepted status' 
       });
-    } catch (error) {
-      await db.run('ROLLBACK');
-      throw error;
     }
+
+    // Update complaint status
+    await connection.execute(`
+      UPDATE complaints 
+      SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [complaintId]);
+
+    // Close associated chat room if exists
+    if (complaint.chat_room_id) {
+      await connection.execute(`
+        UPDATE chat_rooms 
+        SET status = 'closed', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, [complaint.chat_room_id]);
+
+      // Add system message about resolution
+      await connection.execute(`
+        INSERT INTO chat_messages (room_id, sender_id, sender_type, message, message_type)
+        VALUES (?, ?, 'admin', 'Pengaduan ini telah diselesaikan. Chat room akan ditutup.', 'system')
+      `, [complaint.chat_room_id, req.user.id]);
+    }
+
+    await connection.commit();
+
+    res.json({
+      message: 'Complaint resolved successfully'
+    });
   } catch (error) {
+    if (connection) {
+      await connection.rollback();
+    }
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 });
 

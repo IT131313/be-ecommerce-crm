@@ -77,13 +77,13 @@ BEGIN
       NEW.user_id,
       oi.product_id,
       CURDATE(),
-      DATE_ADD(CURDATE(), INTERVAL 365 DAY) -- 1 year warranty
+      DATE_ADD(CURDATE(), INTERVAL 30 DAY) -- 30-day warranty
     FROM order_items oi
     WHERE oi.order_id = NEW.id
     ON DUPLICATE KEY UPDATE
       status = 'active',
       issue_date = CURDATE(),
-      expiry_date = DATE_ADD(CURDATE(), INTERVAL 365 DAY);
+      expiry_date = DATE_ADD(CURDATE(), INTERVAL 30 DAY);
   END IF;
 END//
 DELIMITER ;

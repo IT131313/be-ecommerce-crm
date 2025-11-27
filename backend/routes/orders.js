@@ -239,7 +239,7 @@ router.patch('/:id/complete', userOnlyMiddleware, async (req, res) => {
         o.user_id,
         oi.product_id,
         CURDATE(),
-        DATE_ADD(CURDATE(), INTERVAL 365 DAY)
+        DATE_ADD(CURDATE(), INTERVAL 30 DAY)
       FROM orders o
       JOIN order_items oi ON oi.order_id = o.id
       WHERE o.id = ?
@@ -298,16 +298,16 @@ router.patch('/:id/status', adminAuthMiddleware, async (req, res) => {
       await db.run(`
         INSERT INTO warranty_tickets (order_id, user_id, product_id, issue_date, expiry_date)
         SELECT
-          o.id,
-          o.user_id,
-          oi.product_id,
-          CURDATE(),
-          DATE_ADD(CURDATE(), INTERVAL 365 DAY)
-        FROM orders o
-        JOIN order_items oi ON oi.order_id = o.id
-        WHERE o.id = ?
-        ON DUPLICATE KEY UPDATE
-          status = 'active',
+        o.id,
+        o.user_id,
+        oi.product_id,
+        CURDATE(),
+        DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.id = ?
+      ON DUPLICATE KEY UPDATE
+        status = 'active',
           issue_date = VALUES(issue_date),
           expiry_date = VALUES(expiry_date)
       `, [req.params.id]);

@@ -43,6 +43,7 @@ const TIMELINE_STATUSES = new Set(['pending', 'in_progress', 'completed', 'cance
 const TIMELINE_ACTIVITY_TYPES = new Set(['progress', 'meeting', 'finalization']);
 const PAYMENT_STATUSES = new Set([
   'not_ready',
+  'dp_paid',
   'awaiting_cancellation_fee',
   'cancellation_fee_recorded',
   'awaiting_final_payment',
@@ -1661,7 +1662,10 @@ router.patch('/:id/cancel', userOnlyMiddleware, async (req, res) => {
     const contract = await getLatestConsultationContract(consultation.id);
     const cancellationFeePercent = consultation.cancellation_fee_percent ?? 10;
     const cancellationFeeAmount = calculateCancellationFee(contract?.project_cost || 0, cancellationFeePercent);
-    const nextPaymentStatus = cancellationFeeAmount > 0 ? 'awaiting_cancellation_fee' : consultation.payment_status;
+    const dpCoversPenalty = consultation.payment_status === 'dp_paid';
+    const nextPaymentStatus = dpCoversPenalty
+      ? 'cancellation_fee_recorded'
+      : (cancellationFeeAmount > 0 ? 'awaiting_cancellation_fee' : consultation.payment_status);
 
     await db.run(
       `UPDATE consultations 
@@ -1671,7 +1675,7 @@ router.patch('/:id/cancel', userOnlyMiddleware, async (req, res) => {
          cancellation_fee_amount = ?,
          final_delivery_status = 'withheld'
        WHERE id = ?`,
-      [nextPaymentStatus, cancellationFeeAmount, req.params.id]
+      [nextPaymentStatus, dpCoversPenalty ? 0 : cancellationFeeAmount, req.params.id]
     );
 
     res.json({ 
@@ -1731,7 +1735,7 @@ router.patch('/:id/payment-status', adminAuthMiddleware, async (req, res) => {
     let resolvedDeliveryStatus = finalDeliveryStatus;
     if (!resolvedDeliveryStatus && paymentStatus === 'paid') {
       resolvedDeliveryStatus = 'delivered';
-    } else if (!resolvedDeliveryStatus && ['awaiting_final_payment', 'awaiting_cancellation_fee'].includes(paymentStatus)) {
+    } else if (!resolvedDeliveryStatus && ['awaiting_final_payment', 'awaiting_cancellation_fee', 'dp_paid'].includes(paymentStatus)) {
       resolvedDeliveryStatus = 'withheld';
     }
 

@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const db = require('../config/database');
+const { notifyUsers } = require('../services/notificationService');
 
 // Store active connections
 const activeConnections = new Map();
@@ -242,6 +243,30 @@ const handleChatConnection = (io) => {
           sender: savedMessage.sender_type, // alias for FE compatibility
           createdAt: savedMessage.created_at
         };
+
+        // If admin replies, push a notification to the chat owner
+        if (socket.userType === 'admin') {
+          try {
+            const room = await db.get(
+              'SELECT user_id FROM chat_rooms WHERE id = ?',
+              [socket.currentRoomId]
+            );
+
+            if (room?.user_id) {
+              await notifyUsers([room.user_id], {
+                type: 'chat_reply',
+                title: 'Balasan chat dari admin',
+                body: message.trim().slice(0, 180),
+                data: {
+                  room_id: socket.currentRoomId,
+                  message_id: savedMessage.id
+                }
+              });
+            }
+          } catch (err) {
+            console.warn('Failed to send chat reply notification:', err?.message || err);
+          }
+        }
 
         // Send to all participants in the room
         io.to(`room_${socket.currentRoomId}`).emit('new_message', messageData);
