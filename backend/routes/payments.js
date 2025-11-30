@@ -382,7 +382,7 @@ router.post('/consultations/:consultationId/snap', authMiddleware, async (req, r
       if (consultation.payment_status === 'paid') {
         return res.status(400).json({ error: 'Consultation is already paid' });
       }
-      const allowedStatuses = new Set(['awaiting_final_payment', 'awaiting_payment', 'overdue', 'dp_paid']);
+      const allowedStatuses = new Set(['awaiting_final_payment', 'awaiting_payment', 'overdue']);
       if (!allowedStatuses.has(consultation.payment_status)) {
         return res.status(400).json({ error: 'Consultation is not ready for final payment' });
       }
@@ -513,7 +513,7 @@ async function applyConsultationStatusFromPayment(consultationId, purpose, trans
   } else if (purpose === PAYMENT_PURPOSES.CONSULTATION_DP) {
     await db.run(
       `UPDATE consultations
-       SET payment_status = 'dp_paid'
+       SET payment_status = 'not_ready_final'
        WHERE id = ?`,
       [consultationId]
     );

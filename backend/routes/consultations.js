@@ -43,6 +43,7 @@ const TIMELINE_STATUSES = new Set(['pending', 'in_progress', 'completed', 'cance
 const TIMELINE_ACTIVITY_TYPES = new Set(['progress', 'meeting', 'finalization']);
 const PAYMENT_STATUSES = new Set([
   'not_ready',
+  'not_ready_final',
   'dp_paid',
   'awaiting_cancellation_fee',
   'cancellation_fee_recorded',
@@ -296,7 +297,9 @@ async function syncContractPaymentStage(contractId) {
       c.status,
       c.payment_status,
       COUNT(ti.id) AS total_items,
-      SUM(CASE WHEN ti.status = 'completed' THEN 1 ELSE 0 END) AS completed_items
+      SUM(CASE WHEN ti.status = 'completed' THEN 1 ELSE 0 END) AS completed_items,
+      SUM(CASE WHEN ti.activity_type <> 'finalization' THEN 1 ELSE 0 END) AS non_final_items,
+      SUM(CASE WHEN ti.activity_type <> 'finalization' AND ti.status = 'completed' THEN 1 ELSE 0 END) AS completed_non_final
     FROM consultation_contracts cc
     JOIN consultations c ON c.id = cc.consultation_id
     LEFT JOIN consultation_timeline_items ti ON ti.contract_id = cc.id
@@ -310,7 +313,7 @@ async function syncContractPaymentStage(contractId) {
     return;
   }
 
-  if (stats.completed_items === stats.total_items) {
+  if (stats.non_final_items > 0 && stats.completed_non_final === stats.non_final_items) {
     await db.run(
       `
       UPDATE consultations
@@ -740,6 +743,25 @@ router.post(
       }
 
       if (consultation.status !== 'cancelled') {
+        // Saat kontrak terunggah, tandai siap terima DP/pembayaran awal
+        await db.run(
+          `UPDATE consultations
+           SET 
+             status = CASE 
+               WHEN status IN ('cancelled', 'finalized') THEN status
+             ELSE 'awaiting_payment'
+           END,
+             payment_status = CASE
+              WHEN payment_status IN ('paid', 'dp_paid', 'not_ready_final', 'awaiting_final_payment', 'awaiting_cancellation_fee', 'cancellation_fee_recorded') THEN payment_status
+              ELSE 'awaiting_payment'
+             END,
+             final_delivery_status = CASE
+               WHEN final_delivery_status = 'not_ready' THEN 'withheld'
+               ELSE final_delivery_status
+             END
+           WHERE id = ?`,
+          [consultationId]
+        );
         await updateConsultationStatusIfAllowed(consultationId, 'contract_uploaded');
       }
 
@@ -1111,12 +1133,20 @@ router.patch('/:id/contracts/:contractId/timeline/:timelineItemId', adminAuthMid
   const { status, dueDate } = req.body || {};
   const meetingDatetimeInput = req.body?.meetingDatetime ?? req.body?.meeting_datetime;
   const meetingLinkInput = req.body?.meetingLink ?? req.body?.meeting_link;
+  const titleInput = req.body?.title;
+  const descriptionInput = req.body?.description;
+  const activityTypeInput = req.body?.activityType ?? req.body?.activity_type;
+  const orderIndexInput = req.body?.orderIndex ?? req.body?.order_index;
 
   if (
     !status &&
     typeof dueDate === 'undefined' &&
     typeof meetingDatetimeInput === 'undefined' &&
     typeof meetingLinkInput === 'undefined' &&
+    typeof titleInput === 'undefined' &&
+    typeof descriptionInput === 'undefined' &&
+    typeof activityTypeInput === 'undefined' &&
+    typeof orderIndexInput === 'undefined' &&
     !req.file
   ) {
     return res.status(400).json({ error: 'Nothing to update' });
@@ -1144,6 +1174,39 @@ router.patch('/:id/contracts/:contractId/timeline/:timelineItemId', adminAuthMid
       ? null
       : String(meetingLinkInput).trim() || null;
 
+  const normalizedTitle = typeof titleInput === 'undefined'
+    ? undefined
+    : String(titleInput).trim();
+
+  if (typeof normalizedTitle !== 'undefined' && normalizedTitle.length === 0) {
+    await cleanupUpload();
+    return res.status(400).json({ error: 'title tidak boleh kosong' });
+  }
+
+  const normalizedDescription = typeof descriptionInput === 'undefined'
+    ? undefined
+    : (typeof descriptionInput === 'string' && descriptionInput.trim().length > 0
+        ? descriptionInput.trim()
+        : null);
+
+  const normalizedActivityType = typeof activityTypeInput === 'undefined'
+    ? undefined
+    : String(activityTypeInput).trim().toLowerCase();
+
+  if (typeof normalizedActivityType !== 'undefined' && !TIMELINE_ACTIVITY_TYPES.has(normalizedActivityType)) {
+    await cleanupUpload();
+    return res.status(400).json({ error: 'activityType tidak valid' });
+  }
+
+  const normalizedOrderIndex = typeof orderIndexInput === 'undefined'
+    ? undefined
+    : Number(orderIndexInput);
+
+  if (typeof normalizedOrderIndex !== 'undefined' && !Number.isInteger(normalizedOrderIndex)) {
+    await cleanupUpload();
+    return res.status(400).json({ error: 'orderIndex harus bilangan bulat' });
+  }
+
   if (typeof normalizedDueDate !== 'undefined' && normalizedDueDate === null && dueDate) {
     await cleanupUpload();
     return res.status(400).json({ error: 'dueDate tidak valid' });
@@ -1163,12 +1226,14 @@ router.patch('/:id/contracts/:contractId/timeline/:timelineItemId', adminAuthMid
       return res.status(404).json({ error: 'Timeline item not found for consultation' });
     }
 
-    if (status === 'completed' && access.activity_type === 'finalization' && access.payment_status !== 'paid') {
+    const nextActivityType = normalizedActivityType || access.activity_type;
+
+    if (status === 'completed' && nextActivityType === 'finalization' && access.payment_status !== 'paid') {
       await cleanupUpload();
       return res.status(400).json({ error: 'Customer belum melunasi pembayaran, finalisasi tidak boleh diselesaikan' });
     }
 
-    if (req.file && access.activity_type === 'meeting') {
+    if (req.file && nextActivityType === 'meeting') {
       await cleanupUpload();
       return res.status(400).json({ error: 'Meeting tidak membutuhkan file hasil' });
     }
@@ -1180,30 +1245,66 @@ router.patch('/:id/contracts/:contractId/timeline/:timelineItemId', adminAuthMid
 
     if (
       status === 'completed' &&
-      ['progress', 'finalization'].includes(access.activity_type) &&
+      ['progress', 'finalization'].includes(nextActivityType) &&
       !req.file
     ) {
       await cleanupUpload();
       return res.status(400).json({ error: 'Mohon unggah file hasil ketika menandai progress/finalisasi selesai' });
     }
 
-    if (typeof normalizedDueDate !== 'undefined' && access.activity_type === 'meeting') {
+    if (typeof normalizedDueDate !== 'undefined' && nextActivityType === 'meeting') {
       await cleanupUpload();
       return res.status(400).json({ error: 'dueDate tidak berlaku untuk aktivitas meeting' });
     }
 
-    if (typeof normalizedMeetingDatetime !== 'undefined' && access.activity_type !== 'meeting') {
+    if (typeof normalizedMeetingDatetime !== 'undefined' && nextActivityType !== 'meeting') {
       await cleanupUpload();
       return res.status(400).json({ error: 'meetingDatetime hanya untuk aktivitas meeting' });
     }
 
-    if (typeof normalizedMeetingLink !== 'undefined' && access.activity_type !== 'meeting') {
+    if (typeof normalizedMeetingLink !== 'undefined' && nextActivityType !== 'meeting') {
       await cleanupUpload();
       return res.status(400).json({ error: 'meetingLink hanya untuk aktivitas meeting' });
     }
 
+    // If changing activity type, ensure required fields are available
+    if (normalizedActivityType) {
+      if (nextActivityType === 'meeting') {
+        const effectiveMeetingDatetime = typeof normalizedMeetingDatetime !== 'undefined'
+          ? normalizedMeetingDatetime
+          : access.meeting_datetime;
+        if (!effectiveMeetingDatetime) {
+          await cleanupUpload();
+          return res.status(400).json({ error: 'meetingDatetime wajib untuk aktivitas meeting' });
+        }
+      } else {
+        const effectiveDueDate = typeof normalizedDueDate !== 'undefined'
+          ? normalizedDueDate
+          : access.due_date;
+        if (!effectiveDueDate) {
+          await cleanupUpload();
+          return res.status(400).json({ error: 'dueDate wajib untuk aktivitas progress/finalization' });
+        }
+      }
+    }
+
     const updates = [];
     const params = [];
+
+    if (normalizedTitle !== undefined) {
+      updates.push('title = ?');
+      params.push(normalizedTitle);
+    }
+
+    if (normalizedDescription !== undefined) {
+      updates.push('description = ?');
+      params.push(normalizedDescription);
+    }
+
+    if (normalizedActivityType !== undefined) {
+      updates.push('activity_type = ?');
+      params.push(nextActivityType);
+    }
 
     if (status) {
       updates.push('status = ?');
@@ -1223,6 +1324,25 @@ router.patch('/:id/contracts/:contractId/timeline/:timelineItemId', adminAuthMid
     if (normalizedMeetingLink !== undefined) {
       updates.push('meeting_link = ?');
       params.push(normalizedMeetingLink);
+    }
+
+    if (normalizedOrderIndex !== undefined) {
+      updates.push('order_index = ?');
+      params.push(normalizedOrderIndex);
+    }
+
+    // Normalize fields when activity type changes
+    if (normalizedActivityType !== undefined) {
+      if (nextActivityType === 'meeting') {
+        updates.push('due_date = NULL');
+        updates.push('result_file_path = NULL');
+        updates.push('result_original_filename = NULL');
+        updates.push('result_uploaded_at = NULL');
+        updates.push('result_uploaded_by_admin_id = NULL');
+      } else {
+        updates.push('meeting_datetime = NULL');
+        updates.push('meeting_link = NULL');
+      }
     }
 
     let newResultFilePath = null;
@@ -1253,6 +1373,8 @@ router.patch('/:id/contracts/:contractId/timeline/:timelineItemId', adminAuthMid
     timelineUpdated = true;
 
     if (newResultFilePath && access.result_file_path && access.result_file_path !== newResultFilePath) {
+      await deleteTimelineResultFile(access.result_file_path);
+    } else if (!newResultFilePath && normalizedActivityType && nextActivityType === 'meeting' && access.result_file_path) {
       await deleteTimelineResultFile(access.result_file_path);
     }
 
@@ -1662,7 +1784,7 @@ router.patch('/:id/cancel', userOnlyMiddleware, async (req, res) => {
     const contract = await getLatestConsultationContract(consultation.id);
     const cancellationFeePercent = consultation.cancellation_fee_percent ?? 10;
     const cancellationFeeAmount = calculateCancellationFee(contract?.project_cost || 0, cancellationFeePercent);
-    const dpCoversPenalty = consultation.payment_status === 'dp_paid';
+    const dpCoversPenalty = ['dp_paid', 'not_ready_final'].includes(consultation.payment_status);
     const nextPaymentStatus = dpCoversPenalty
       ? 'cancellation_fee_recorded'
       : (cancellationFeeAmount > 0 ? 'awaiting_cancellation_fee' : consultation.payment_status);
@@ -1735,7 +1857,7 @@ router.patch('/:id/payment-status', adminAuthMiddleware, async (req, res) => {
     let resolvedDeliveryStatus = finalDeliveryStatus;
     if (!resolvedDeliveryStatus && paymentStatus === 'paid') {
       resolvedDeliveryStatus = 'delivered';
-    } else if (!resolvedDeliveryStatus && ['awaiting_final_payment', 'awaiting_cancellation_fee', 'dp_paid'].includes(paymentStatus)) {
+    } else if (!resolvedDeliveryStatus && ['awaiting_final_payment', 'awaiting_cancellation_fee', 'dp_paid', 'not_ready_final'].includes(paymentStatus)) {
       resolvedDeliveryStatus = 'withheld';
     }
 

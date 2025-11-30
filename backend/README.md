@@ -652,7 +652,7 @@ Body:
     resultFile = (unggah PDF/ZIP/Gambar hasil)
   ```
 
-  Ketika seluruh aktivitas selesai, sistem otomatis memindahkan konsultasi ke `awaiting_payment` dan `paymentStatus = awaiting_final_payment`. Setelah admin menandai `paymentStatus = paid`, aktivitas finalisasi dapat diunggah sehingga `final_delivery_status` berubah menjadi `delivered`.
+  Setelah DP dibayar, `paymentStatus` akan menjadi `not_ready_final` (menunggu pekerjaan selesai sebelum pelunasan). Ketika seluruh aktivitas non-finalization selesai, sistem otomatis memindahkan konsultasi ke `awaiting_payment` dengan `paymentStatus = awaiting_final_payment`. Setelah admin menandai `paymentStatus = paid`, aktivitas finalisasi dapat diunggah sehingga `final_delivery_status` berubah menjadi `delivered`.
 
 - **Timeline Comments (Admin & Customer)**
   - GET `/:consultationId/contracts/:contractId/timeline/:timelineItemId/comments`
@@ -674,7 +674,7 @@ Body:
     "finalDeliveryNote": "Hasil akhir sudah dikirim via email."
   }
   ```
-  Nilai `paymentStatus` yang didukung: `not_ready`, `awaiting_cancellation_fee`, `cancellation_fee_recorded`, `awaiting_final_payment`, `paid`, `overdue`.
+  Nilai `paymentStatus` yang didukung: `not_ready`, `not_ready_final`, `awaiting_cancellation_fee`, `cancellation_fee_recorded`, `awaiting_final_payment`, `paid`, `overdue`.
   `finalDeliveryStatus` otomatis menjadi `delivered` saat pembayaran ditandai `paid`, atau tetap bisa diatur manual (`withheld` jika pembayaran belum selesai).
 
 ## Integrasi Pembayaran Midtrans Snap

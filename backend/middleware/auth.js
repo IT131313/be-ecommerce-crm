@@ -38,7 +38,9 @@ const authMiddleware = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('Auth middleware error:', error);
-    return res.status(error.status || 401).json({ error: 'Invalid token' });
+    const isExpired = error && error.name === 'TokenExpiredError';
+    const message = isExpired ? 'Token expired' : 'Invalid token';
+    return res.status(error.status || 401).json({ error: message });
   }
 };
 
@@ -64,7 +66,9 @@ const adminAuthMiddleware = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('Admin auth middleware error:', error);
-    return res.status(401).json({ error: 'Invalid token' });
+    const isExpired = error && error.name === 'TokenExpiredError';
+    const message = isExpired ? 'Token expired' : 'Invalid token';
+    return res.status(401).json({ error: message });
   }
 };
 
@@ -90,7 +94,9 @@ const userOnlyMiddleware = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('User auth middleware error:', error);
-    return res.status(401).json({ error: 'Invalid token' });
+    const isExpired = error && error.name === 'TokenExpiredError';
+    const message = isExpired ? 'Token expired' : 'Invalid token';
+    return res.status(401).json({ error: message });
   }
 };
 
